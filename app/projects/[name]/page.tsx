@@ -1,0 +1,243 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+
+import { EmptyState } from "../../empty-state";
+import { AppNav } from "../../nav";
+import { ExportProjectButton } from "../export-project-button";
+import { GenerateKnowledgeSnapshotButton } from "../generate-knowledge-snapshot-button";
+import { defaultConfig } from "../../../lib/paths.ts";
+import { getProjectArchiveIndex } from "../../../lib/project-archives.ts";
+import { getProjectDetail } from "../../../lib/project-detail.ts";
+import type { ProjectKnowledgeSnapshot } from "../../../lib/types.ts";
+
+type PageParams = Promise<{
+  name: string;
+}>;
+
+const labelByStatus = {
+  ok: "正常",
+  warn: "注意",
+  fail: "阻塞"
+};
+
+function formatDate(value: string) {
+  return new Date(value).toLocaleString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+export default async function ProjectDetailPage({ params }: { params: PageParams }) {
+  const { name } = await params;
+  const projectName = decodeURIComponent(name);
+  const [detail, archiveIndex] = await Promise.all([
+    getProjectDetail(defaultConfig.dbPath, projectName),
+    getProjectArchiveIndex({
+      dbPath: defaultConfig.dbPath,
+      obsidianVault: defaultConfig.obsidianVault
+    })
+  ]);
+
+  if (!detail) {
+    notFound();
+  }
+
+  const warningHealth = detail.health.filter((check) => check.status !== "ok");
+  const archiveItem = archiveIndex.items.find((item) => item.project.name === detail.project.name);
+  const knowledgeSnapshot = archiveItem?.latestKnowledgeSnapshot ?? null;
+  const manualNotes = archiveItem?.manualNotes.trim() ?? "";
+  const manualSections = archiveItem?.manualSections;
+  const hasStructuredNotes = Boolean(
+    manualSections &&
+      (manualSections.goals.length > 0 ||
+        manualSections.decisions.length > 0 ||
+        manualSections.blockers.length > 0 ||
+        manualSections.notes.length > 0)
+  );
+
+  return (
+    <>
+      <AppNav />
+      <main className="workspace">
+        <header className="page-header project-detail-header">
+          <div>
+            <p className="eyebrow">Project Memory</p>
+            <h1>{detail.project.name}</h1>
+          </div>
+          <div className="project-header-actions">
+            <p>{detail.project.path}</p>
+            <ExportProjectButton projectName={detail.project.name} />
+          </div>
+        </header>
+
+        <section className="project-hero panel">
+          <div>
+            <span className="muted-label">技术栈</span>
+            <strong>{detail.project.techStack.join(" / ")}</strong>
+          </div>
+          <div>
+            <span className="muted-label">入口脚本</span>
+            <strong>{detail.project.scripts.length > 0 ? detail.project.scripts.join("、") : "暂无脚本"}</strong>
+          </div>
+          <div>
+            <span className="muted-label">仓库状态</span>
+            <strong>{detail.project.hasGit ? "Git 项目" : "普通目录"}</strong>
+          </div>
+          <div>
+            <span className="muted-label">最近更新</span>
+            <strong>{formatDate(detail.project.updatedAt)}</strong>
+          </div>
+        </section>
+
+        <div className="project-detail-grid">
+          <section className="panel project-memory-panel">
+            <div className="section-heading">
+              <h2>关联记忆</h2>
+              <Link href={`/memories?project=${encodeURIComponent(detail.project.name)}`}>检索</Link>
+            </div>
+            {detail.relatedTags.length > 0 ? (
+              <div className="tag-row project-tags">
+                {detail.relatedTags.map((tag) => (
+                  <Link key={tag} href={`/memories?tag=${encodeURIComponent(tag)}`}>
+                    {tag}
+                  </Link>
+                ))}
+              </div>
+            ) : null}
+            {detail.memories.length === 0 ? (
+              <EmptyState title="还没有关联记忆" detail="后续采集到带有项目路径的 Codex 或 Claude 对话后，这里会自动聚合。" />
+            ) : (
+              <ol className="memory-list">
+                {detail.memories.map((item) => (
+                  <li key={item.id}>
+                    <div>
+                      <span>{item.source === "codex" ? "Codex" : "Claude"}</span>
+                      <time>{formatDate(item.occurredAt)}</time>
+                    </div>
+                    <strong>{item.title}</strong>
+                    {item.projectPath ? <p>{item.projectPath}</p> : null}
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
+
+          <aside className="project-side-column">
+          <section className="panel">
+            <div className="section-heading">
+              <h2>手动备注</h2>
+                <span className="muted-label">{archiveItem?.archiveExists ? "Obsidian" : "未导出"}</span>
+              </div>
+              {hasStructuredNotes && manualSections ? (
+                <div className="manual-section-grid">
+                  <ManualSection title="目标" items={manualSections.goals} />
+                  <ManualSection title="决策" items={manualSections.decisions} />
+                  <ManualSection title="阻塞" items={manualSections.blockers} tone="warn" />
+                  <ManualSection title="备注" items={manualSections.notes} />
+                </div>
+              ) : manualNotes ? (
+                <pre className="manual-notes">{manualNotes}</pre>
+              ) : (
+                <EmptyState title="还没有手动备注" detail="导出项目档案后，可以在 Obsidian 的手动备注区补充目标、决策和上下文。" />
+              )}
+            </section>
+
+            <section className="panel">
+              <div className="section-heading">
+                <h2>阶段快照</h2>
+                <span className="muted-label">{knowledgeSnapshot ? formatDate(knowledgeSnapshot.capturedAt) : "未生成"}</span>
+              </div>
+              {knowledgeSnapshot ? (
+                <KnowledgeSnapshotView snapshot={knowledgeSnapshot} stale={archiveItem?.knowledgeStale ?? false} />
+              ) : (
+                <EmptyState title="还没有阶段快照" detail="生成后会把已落地功能、当前架构、数据来源、测试信号和下一阶段路线写入 SQLite。" />
+              )}
+              <GenerateKnowledgeSnapshotButton projectName={detail.project.name} />
+            </section>
+
+            <section className="panel">
+              <div className="section-heading">
+                <h2>下一步建议</h2>
+                <span className="muted-label">{detail.nextActions.length} 项</span>
+              </div>
+              <ol className="action-list">
+                {detail.nextActions.map((action) => (
+                  <li key={action}>{action}</li>
+                ))}
+              </ol>
+            </section>
+
+            <section className="panel">
+              <div className="section-heading">
+                <h2>环境提醒</h2>
+                <Link href="/health">{warningHealth.length > 0 ? `${warningHealth.length} 个提醒` : "查看体检"}</Link>
+              </div>
+              {detail.health.length === 0 ? (
+                <EmptyState title="暂无关联提醒" detail="环境检查结果正常，或暂时没有和该项目标签相关的体检项。" />
+              ) : (
+                <div className="health-list compact">
+                  {detail.health.map((check) => (
+                    <article key={check.id} className={`health-row ${check.status}`}>
+                      <div>
+                        <strong>{check.label}</strong>
+                        <span>{labelByStatus[check.status]}</span>
+                      </div>
+                      <p>{check.detail}</p>
+                      {check.suggestion ? <small>{check.suggestion}</small> : null}
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+          </aside>
+        </div>
+      </main>
+    </>
+  );
+}
+
+function SnapshotList({ title, items }: { title: string; items: string[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="manual-section">
+      <span className="muted-label">{title}</span>
+      <ul>
+        {items.slice(0, 4).map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function KnowledgeSnapshotView({ snapshot, stale }: { snapshot: ProjectKnowledgeSnapshot; stale: boolean }) {
+  return (
+    <div className="manual-section-grid">
+      <div className={`manual-section ${stale ? "warn" : ""}`}>
+        <span className="muted-label">{stale ? "可能落后" : "最新摘要"}</span>
+        <p>{snapshot.summary}</p>
+      </div>
+      <SnapshotList title="已落地" items={snapshot.shippedFeatures} />
+      <SnapshotList title="当前架构" items={snapshot.currentArchitecture} />
+      <SnapshotList title="已知缺口" items={snapshot.knownGaps} />
+      <SnapshotList title="下一阶段" items={snapshot.nextMilestones} />
+    </div>
+  );
+}
+
+function ManualSection({ title, items, tone = "idle" }: { title: string; items: string[]; tone?: "idle" | "warn" }) {
+  if (items.length === 0) return null;
+  return (
+    <div className={`manual-section ${tone}`}>
+      <span className="muted-label">{title}</span>
+      <ul>
+        {items.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}

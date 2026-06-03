@@ -1,0 +1,16 @@
+.next/
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.env*.local
+.env
+.env.*
+!.env.example
+.codegraph/
+.playwright-cli/
+output/
+data/*.sqlite
+data/*.sqlite-shm
+data/*.sqlite-wal
+data/*.sqlite.bak-*

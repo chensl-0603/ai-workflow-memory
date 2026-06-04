@@ -303,6 +303,63 @@ button:disabled {
   margin-top: 18px;
 }
 
+.daily-focus-panel {
+  margin-top: 18px;
+}
+
+.daily-focus-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.daily-focus-grid > div {
+  background: oklch(1 0 0 / 0.026);
+  border: 1px solid oklch(1 0 0 / 0.055);
+  border-radius: 8px;
+  min-width: 0;
+  padding: 14px;
+}
+
+.daily-focus-grid h3 {
+  font-size: 13px;
+  margin: 0 0 12px;
+}
+
+.daily-focus-grid ul {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.daily-focus-grid li {
+  min-width: 0;
+}
+
+.daily-focus-grid strong {
+  display: block;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.daily-focus-grid span {
+  color: var(--accent);
+  display: inline-block;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 10px;
+  font-weight: 800;
+  margin-top: 4px;
+  text-transform: uppercase;
+}
+
+.daily-focus-grid p {
+  color: var(--muted);
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
+}
+
 .daily-action-list {
   display: grid;
   gap: 10px;
@@ -1826,6 +1883,7 @@ strong {
   .page-header,
   .two-column,
   .metrics-grid,
+  .daily-focus-grid,
   .project-index-summary,
   .archive-audit-summary,
   .fallback-review-summary,

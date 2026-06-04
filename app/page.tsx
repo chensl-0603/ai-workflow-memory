@@ -4,22 +4,36 @@ import { ActionStatusControls } from "./action-status-controls";
 import { ActionsPanel } from "./actions-panel";
 import { EmptyState } from "./empty-state";
 import { AppNav } from "./nav";
+import { getActionInbox } from "../lib/action-inbox.ts";
 import { getDailyActions } from "../lib/daily-actions.ts";
+import { buildDailyFocus } from "../lib/daily-focus.ts";
 import { defaultConfig, toDateKey } from "../lib/paths.ts";
 import { getDailyReview } from "../lib/review.ts";
 
 export const dynamic = "force-dynamic";
 
+const priorityLabels = {
+  high: "高",
+  medium: "中",
+  low: "低"
+} as const;
+
 export default async function HomePage() {
   const date = toDateKey(new Date());
-  const [review, dailyActions] = await Promise.all([
+  const [review, dailyActions, inbox] = await Promise.all([
     getDailyReview(defaultConfig.dbPath, date),
     getDailyActions({
       dbPath: defaultConfig.dbPath,
       obsidianVault: defaultConfig.obsidianVault,
       date
+    }),
+    getActionInbox({
+      dbPath: defaultConfig.dbPath,
+      obsidianVault: defaultConfig.obsidianVault,
+      today: date
     })
   ]);
+  const focus = buildDailyFocus({ review, actions: dailyActions, inbox });
   const activeProjects = review.projects.slice(0, 5);
   const recentConversations = review.conversations.slice(0, 6);
   const warnings = review.health.filter((check) => check.status !== "ok").slice(0, 5);
@@ -41,6 +55,65 @@ export default async function HomePage() {
         </header>
 
         <ActionsPanel date={date} />
+
+        <section className="panel daily-focus-panel">
+          <div className="section-heading">
+            <h2>今日复盘焦点</h2>
+            <span className="muted-label">
+              {focus.summary.progressedProjects} 推进 / {focus.summary.repeatedBlockers} 阻塞
+            </span>
+          </div>
+          <div className="daily-focus-grid">
+            <div>
+              <h3>推进项目</h3>
+              {focus.projectProgress.length === 0 ? (
+                <p>暂无项目推进信号。</p>
+              ) : (
+                <ul>
+                  {focus.projectProgress.slice(0, 3).map((item) => (
+                    <li key={item.projectPath ?? item.projectName}>
+                      <strong>{item.projectName}</strong>
+                      <span>{item.conversationCount} 条对话</span>
+                      <p>{item.latestTitle}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div>
+              <h3>反复阻塞</h3>
+              {focus.repeatedBlockers.length === 0 ? (
+                <p>暂无反复出现的阻塞。</p>
+              ) : (
+                <ul>
+                  {focus.repeatedBlockers.slice(0, 3).map((item) => (
+                    <li key={item.key}>
+                      <strong>{item.projectName}</strong>
+                      <span>{item.count} 次</span>
+                      <p>{item.detail}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div>
+              <h3>下一步</h3>
+              {focus.nextSteps.length === 0 ? (
+                <p>今日行动已收口。</p>
+              ) : (
+                <ul>
+                  {focus.nextSteps.map((item) => (
+                    <li key={item.id}>
+                      <strong>{item.title}</strong>
+                      <span>{priorityLabels[item.priority]}</span>
+                      <p>{item.detail}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </section>
 
         <section className="panel daily-actions-panel">
           <div className="section-heading">

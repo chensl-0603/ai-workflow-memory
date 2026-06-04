@@ -1,4 +1,6 @@
+import { getActionInbox } from "./action-inbox.ts";
 import { getDailyActions } from "./daily-actions.ts";
+import { buildDailyFocus } from "./daily-focus.ts";
 import { getDailyReview } from "./review.ts";
 import type { DailyPayload } from "./types.ts";
 
@@ -7,13 +9,19 @@ export async function getDailyPayload(options: {
   obsidianVault: string;
   date: string;
 }): Promise<DailyPayload> {
-  const [review, actions] = await Promise.all([
+  const [review, actions, inbox] = await Promise.all([
     getDailyReview(options.dbPath, options.date),
-    getDailyActions(options)
+    getDailyActions(options),
+    getActionInbox({
+      dbPath: options.dbPath,
+      obsidianVault: options.obsidianVault,
+      today: options.date
+    })
   ]);
 
   return {
     ...review,
-    actions
+    actions,
+    focus: buildDailyFocus({ review, actions, inbox })
   };
 }

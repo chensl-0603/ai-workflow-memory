@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { getActionInbox } from "./action-inbox.ts";
 import { getDailyActions } from "./daily-actions.ts";
+import { buildDailyFocus } from "./daily-focus.ts";
 import {
   getArchiveCandidateAudit,
   getCleanupRuns,
@@ -52,12 +53,32 @@ async function renderGeneratedMarkdown(options: {
   review: Awaited<ReturnType<typeof getDailyReview>>;
 }) {
   const review = options.review;
-  const dailyActions = await getDailyActions({
-    dbPath: options.dbPath,
-    obsidianVault: options.obsidianVault,
-    date: review.date,
-    limit: 5
-  });
+  const [dailyActions, inbox] = await Promise.all([
+    getDailyActions({
+      dbPath: options.dbPath,
+      obsidianVault: options.obsidianVault,
+      date: review.date,
+      limit: 5
+    }),
+    getActionInbox({
+      dbPath: options.dbPath,
+      obsidianVault: options.obsidianVault,
+      today: review.date
+    })
+  ]);
+  const focus = buildDailyFocus({ review, actions: dailyActions, inbox });
+  const projectProgress = focus.projectProgress
+    .map((item) => {
+      const tags = item.tags.length > 0 ? `；标签：${item.tags.join("、")}` : "";
+      return `- ${item.projectName}：${item.conversationCount} 条对话，最新：${item.latestTitle}${tags}`;
+    })
+    .join("\n") || "- 今天还没有项目推进信号。";
+  const repeatedBlockers = focus.repeatedBlockers
+    .map((item) => `- ${item.projectName}：${item.detail}，出现 ${item.count} 次（${item.dates.join(", ")}）`)
+    .join("\n") || "- 暂无跨复盘日反复出现的阻塞。";
+  const nextSteps = focus.nextSteps
+    .map((item) => `- [${actionPriorityLabels[item.priority]}] ${item.title}：${item.detail}`)
+    .join("\n") || "- 今日行动已收口。";
   const actions = dailyActions.items
     .map(
       (item) =>
@@ -83,6 +104,15 @@ async function renderGeneratedMarkdown(options: {
     `# ${review.date} AI 工作流复盘`,
     "",
     `> ${review.summary}`,
+    "",
+    "## 推进项目",
+    projectProgress,
+    "",
+    "## 反复阻塞",
+    repeatedBlockers,
+    "",
+    "## 下一步",
+    nextSteps,
     "",
     "## 今日行动",
     actions,

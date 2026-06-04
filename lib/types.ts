@@ -351,8 +351,43 @@ export type DailyActions = {
   };
 };
 
+export type DailyProjectProgress = {
+  projectName: string;
+  projectPath: string | null;
+  conversationCount: number;
+  latestTitle: string;
+  latestAt: string;
+  tags: string[];
+};
+
+export type DailyRepeatedBlocker = {
+  key: string;
+  projectName: string;
+  title: string;
+  detail: string;
+  href: string;
+  priority: DailyActionPriority;
+  status: DailyActionStatus;
+  count: number;
+  dates: string[];
+  latestDate: string;
+  reason: string;
+};
+
+export type DailyFocus = {
+  projectProgress: DailyProjectProgress[];
+  repeatedBlockers: DailyRepeatedBlocker[];
+  nextSteps: DailyActionItem[];
+  summary: {
+    progressedProjects: number;
+    repeatedBlockers: number;
+    nextSteps: number;
+  };
+};
+
 export type DailyPayload = DailyReview & {
   actions: DailyActions;
+  focus: DailyFocus;
 };
 
 export type ReviewHistoryItem = {

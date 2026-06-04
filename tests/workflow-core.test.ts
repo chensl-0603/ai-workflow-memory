@@ -1303,6 +1303,11 @@ test("exports daily review while preserving manual Obsidian notes", async () => 
     assert.equal(exportedPath, target);
     assert.match(markdown, /# 2026-05-30 AI 工作流复盘/);
     assert.match(markdown, /## 今日行动/);
+    assert.match(markdown, /## 推进项目/);
+    assert.match(markdown, /hotspot-hub：2 条对话/);
+    assert.match(markdown, /## 反复阻塞/);
+    assert.match(markdown, /FarmGame/);
+    assert.match(markdown, /## 下一步/);
     assert.match(markdown, /回顾今日新增记忆/);
     assert.match(markdown, /已完成/);
     assert.match(markdown, /优化首页天气新闻GitHub卡片/);
@@ -1784,6 +1789,11 @@ test("builds daily api payload with review fields and action suggestions", async
     assert.equal(payload.actions.summary.date, "2026-05-30");
     assert.ok(payload.actions.items.some((item) => item.kind === "memory"));
     assert.ok(payload.actions.items.every((item) => item.href.startsWith("/")));
+    assert.equal(payload.focus.summary.progressedProjects, 1);
+    assert.equal(payload.focus.projectProgress[0]?.projectName, "hotspot-hub");
+    assert.equal(payload.focus.projectProgress[0]?.conversationCount, 2);
+    assert.ok(payload.focus.repeatedBlockers.some((item) => item.projectName === "FarmGame" && item.count > 1));
+    assert.ok(payload.focus.nextSteps.some((item) => item.title.includes("处理")));
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }

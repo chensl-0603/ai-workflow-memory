@@ -507,6 +507,34 @@ export type SyncRun = {
   message: string;
   diagnosis: SyncFailureDiagnosis | null;
   ranAt: string;
+  snapshotSummary?: SyncRunSnapshotSummary;
+};
+
+export type SyncSnapshotPhase = "before" | "after" | "failure";
+
+export type SyncRunSnapshotSummary = {
+  beforeTargets: number;
+  afterTargets: number;
+  failureTargets: number;
+  changedTargets: number;
+};
+
+export type SyncTargetSnapshot = SyncTargetStatus & {
+  id: string;
+  syncRunId: string;
+  phase: SyncSnapshotPhase;
+  capturedAt: string;
+};
+
+export type SyncSnapshotReport = {
+  items: SyncTargetSnapshot[];
+  summary: {
+    totalSnapshots: number;
+    beforeExistingTargets: number;
+    afterExistingTargets: number;
+    failureExistingTargets: number;
+    changedTargets: number;
+  };
 };
 
 export type SyncFailureCodeCount = {

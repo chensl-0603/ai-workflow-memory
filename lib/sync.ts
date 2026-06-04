@@ -9,6 +9,9 @@ import type {
   SyncFailureDiagnosis,
   SyncAudit,
   SyncRun,
+  SyncRunSnapshotSummary,
+  SyncSnapshotPhase,
+  SyncSnapshotReport,
   SyncRunStatus,
   SyncRunStatusFilter,
   SyncStage,
@@ -25,6 +28,19 @@ type SyncRunRow = {
   message: string;
   failure_stage: string | null;
   ran_at: string;
+};
+
+type SyncTargetSnapshotRow = {
+  id: string;
+  sync_run_id: string;
+  phase: string;
+  target_kind: string;
+  target_label: string;
+  target_path: string;
+  file_exists: number;
+  size_bytes: number;
+  updated_at: string | null;
+  captured_at: string;
 };
 
 const syncStageLabels: Record<SyncStage, string> = {
@@ -104,7 +120,7 @@ function normalizeStatusFilter(status: SyncRunStatusFilter | undefined): SyncRun
   return status === "ok" || status === "fail" ? status : "all";
 }
 
-function mapSyncRunRow(row: SyncRunRow): SyncRun {
+function mapSyncRunRow(row: SyncRunRow, snapshotSummary?: SyncRunSnapshotSummary): SyncRun {
   return {
     id: row.id,
     date: row.date,
@@ -112,11 +128,13 @@ function mapSyncRunRow(row: SyncRunRow): SyncRun {
     projectCount: row.project_count,
     message: row.message,
     diagnosis: row.status === "fail" ? diagnoseSyncFailure(parseSyncStage(row.failure_stage), new Error(row.message)) : null,
-    ranAt: row.ran_at
+    ranAt: row.ran_at,
+    snapshotSummary
   };
 }
 
 async function recordSyncRun(options: {
+  id?: string;
   dbPath: string;
   date: string;
   status: SyncRunStatus;
@@ -127,11 +145,55 @@ async function recordSyncRun(options: {
 }) {
   const db = await ensureDatabase(options.dbPath);
   const ranAt = options.ranAt ?? new Date().toISOString();
+  const id = options.id ?? makeSyncRunId(ranAt);
   try {
     db.prepare(
       `INSERT INTO sync_runs (id, date, status, project_count, message, failure_stage, ran_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(makeSyncRunId(ranAt), options.date, options.status, options.projectCount, options.message, options.failureStage ?? null, ranAt);
+    ).run(id, options.date, options.status, options.projectCount, options.message, options.failureStage ?? null, ranAt);
+    return id;
+  } finally {
+    db.close();
+  }
+}
+
+async function recordSyncTargetSnapshots(options: {
+  dbPath: string;
+  syncRunId: string;
+  phase: SyncSnapshotPhase;
+  status: SyncStatus;
+  capturedAt?: string;
+}) {
+  const db = await ensureDatabase(options.dbPath);
+  const capturedAt = options.capturedAt ?? new Date().toISOString();
+  try {
+    const insert = db.prepare(
+      `INSERT INTO sync_target_snapshots
+       (id, sync_run_id, phase, target_kind, target_label, target_path, file_exists, size_bytes, updated_at, captured_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    db.exec("BEGIN");
+    try {
+      for (const target of options.status.targets) {
+        const id = `${options.syncRunId}:${options.phase}:${target.kind}:${target.path}`;
+        insert.run(
+          id,
+          options.syncRunId,
+          options.phase,
+          target.kind,
+          target.label,
+          target.path,
+          target.exists ? 1 : 0,
+          target.sizeBytes,
+          target.updatedAt,
+          capturedAt
+        );
+      }
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
   } finally {
     db.close();
   }
@@ -144,7 +206,11 @@ export async function syncObsidian(options: {
 }) {
   let projectCount = 0;
   let stage: SyncStage = "daily";
+  const ranAt = new Date().toISOString();
+  const syncRunId = makeSyncRunId(ranAt);
+  let beforeStatus: SyncStatus | null = null;
   try {
+    beforeStatus = await getSyncStatus(options);
     const dailyPath = await exportDailyReviewToObsidian({
       dbPath: options.dbPath,
       obsidianVault: options.obsidianVault,
@@ -162,11 +228,28 @@ export async function syncObsidian(options: {
     projectCount = projects.exported;
 
     await recordSyncRun({
+      id: syncRunId,
       dbPath: options.dbPath,
       date: options.today,
       status: "ok",
       projectCount,
-      message: `Daily、Actions、Strategy、${projects.exported} 个项目档案和 ${projects.snapshots} 个阶段快照已同步。`
+      message: `Daily、Actions、Strategy、${projects.exported} 个项目档案和 ${projects.snapshots} 个阶段快照已同步。`,
+      ranAt
+    });
+    if (beforeStatus) {
+      await recordSyncTargetSnapshots({
+        dbPath: options.dbPath,
+        syncRunId,
+        phase: "before",
+        status: beforeStatus,
+        capturedAt: ranAt
+      });
+    }
+    await recordSyncTargetSnapshots({
+      dbPath: options.dbPath,
+      syncRunId,
+      phase: "after",
+      status: await getSyncStatus(options)
     });
 
     return {
@@ -178,14 +261,136 @@ export async function syncObsidian(options: {
     };
   } catch (error) {
     await recordSyncRun({
+      id: syncRunId,
       dbPath: options.dbPath,
       date: options.today,
       status: "fail",
       projectCount,
       message: String((error as Error).message),
-      failureStage: stage
+      failureStage: stage,
+      ranAt
     });
+    if (beforeStatus) {
+      await recordSyncTargetSnapshots({
+        dbPath: options.dbPath,
+        syncRunId,
+        phase: "before",
+        status: beforeStatus,
+        capturedAt: ranAt
+      });
+    }
+    try {
+      await recordSyncTargetSnapshots({
+        dbPath: options.dbPath,
+        syncRunId,
+        phase: "failure",
+        status: await getSyncStatus(options)
+      });
+    } catch {
+      // Keep the sync run diagnosis even if the filesystem is too broken to snapshot targets after failure.
+    }
     throw error;
+  }
+}
+
+function parseSnapshotPhase(value: string): SyncSnapshotPhase {
+  return value === "after" || value === "failure" ? value : "before";
+}
+
+function parseSnapshotKind(value: string): SyncTargetKind {
+  return value === "actions" || value === "strategy" || value === "project" ? value : "daily";
+}
+
+function mapSnapshotRow(row: SyncTargetSnapshotRow) {
+  return {
+    id: row.id,
+    syncRunId: row.sync_run_id,
+    phase: parseSnapshotPhase(row.phase),
+    kind: parseSnapshotKind(row.target_kind),
+    label: row.target_label,
+    path: row.target_path,
+    exists: Boolean(row.file_exists),
+    sizeBytes: row.size_bytes,
+    updatedAt: row.updated_at,
+    capturedAt: row.captured_at
+  };
+}
+
+function summarizeSnapshotRows(rows: SyncTargetSnapshotRow[]): SyncRunSnapshotSummary {
+  const items = rows.map(mapSnapshotRow);
+  const beforeByTarget = new Map(items.filter((item) => item.phase === "before").map((item) => [`${item.kind}:${item.path}`, item]));
+  const afterByTarget = new Map(
+    items.filter((item) => item.phase === "after" || item.phase === "failure").map((item) => [`${item.kind}:${item.path}`, item])
+  );
+  let changedTargets = 0;
+  for (const [key, before] of beforeByTarget) {
+    const after = afterByTarget.get(key);
+    if (!after) continue;
+    if (before.exists !== after.exists || before.sizeBytes !== after.sizeBytes || before.updatedAt !== after.updatedAt) {
+      changedTargets += 1;
+    }
+  }
+
+  return {
+    beforeTargets: items.filter((item) => item.phase === "before").length,
+    afterTargets: items.filter((item) => item.phase === "after").length,
+    failureTargets: items.filter((item) => item.phase === "failure").length,
+    changedTargets
+  };
+}
+
+function getSnapshotSummaries(db: Awaited<ReturnType<typeof ensureDatabase>>, syncRunIds: string[]) {
+  const summaries = new Map<string, SyncRunSnapshotSummary>();
+  if (syncRunIds.length === 0) return summaries;
+  const placeholders = syncRunIds.map(() => "?").join(", ");
+  const rows = db
+    .prepare(
+      `SELECT id, sync_run_id, phase, target_kind, target_label, target_path, file_exists, size_bytes, updated_at, captured_at
+       FROM sync_target_snapshots
+       WHERE sync_run_id IN (${placeholders})
+       ORDER BY captured_at DESC, phase ASC, target_kind ASC, target_label ASC`
+    )
+    .all(...syncRunIds) as SyncTargetSnapshotRow[];
+  const byRun = new Map<string, SyncTargetSnapshotRow[]>();
+  for (const row of rows) {
+    byRun.set(row.sync_run_id, [...(byRun.get(row.sync_run_id) ?? []), row]);
+  }
+  for (const [syncRunId, runRows] of byRun) {
+    summaries.set(syncRunId, summarizeSnapshotRows(runRows));
+  }
+  return summaries;
+}
+
+export async function getSyncSnapshots(dbPath: string, options: { syncRunId?: string; limit?: number } = {}): Promise<SyncSnapshotReport> {
+  const db = await ensureDatabase(dbPath);
+  const limit = normalizeLimit(options.limit ?? 50);
+  const where = options.syncRunId ? "WHERE sync_run_id = ?" : "";
+  const params = options.syncRunId ? [options.syncRunId] : [];
+  try {
+    const rows = db
+      .prepare(
+        `SELECT id, sync_run_id, phase, target_kind, target_label, target_path, file_exists, size_bytes, updated_at, captured_at
+         FROM sync_target_snapshots
+         ${where}
+         ORDER BY captured_at DESC, phase ASC, target_kind ASC, target_label ASC
+         LIMIT ?`
+      )
+      .all(...params, limit) as SyncTargetSnapshotRow[];
+    const items = rows.map(mapSnapshotRow);
+    const snapshotSummary = summarizeSnapshotRows(rows);
+
+    return {
+      items,
+      summary: {
+        totalSnapshots: items.length,
+        beforeExistingTargets: items.filter((item) => item.phase === "before" && item.exists).length,
+        afterExistingTargets: items.filter((item) => item.phase === "after" && item.exists).length,
+        failureExistingTargets: items.filter((item) => item.phase === "failure" && item.exists).length,
+        changedTargets: snapshotSummary.changedTargets
+      }
+    };
+  } finally {
+    db.close();
   }
 }
 
@@ -221,7 +426,8 @@ export async function getSyncAudit(options: {
     }
     const okRuns = statsRows.find((row) => row.status === "ok")?.count ?? 0;
     const failedRuns = statsRows.find((row) => row.status === "fail")?.count ?? 0;
-    const items = rows.map(mapSyncRunRow);
+    const snapshotSummaries = getSnapshotSummaries(db, rows.map((row) => row.id));
+    const items = rows.map((row) => mapSyncRunRow(row, snapshotSummaries.get(row.id)));
 
     return {
       items,

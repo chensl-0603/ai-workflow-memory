@@ -199,6 +199,13 @@ export function SyncConsole({ today, initialAudit, initialStatus }: { today: str
                     </div>
                   ) : null}
                   <p>{run.message}</p>
+                  {run.snapshotSummary ? (
+                    <p>
+                      快照：同步前 {run.snapshotSummary.beforeTargets} 项，同步后 {run.snapshotSummary.afterTargets} 项
+                      {run.snapshotSummary.failureTargets > 0 ? `，失败时 ${run.snapshotSummary.failureTargets} 项` : ""}，变化{" "}
+                      {run.snapshotSummary.changedTargets} 项。
+                    </p>
+                  ) : null}
                 </div>
                 <div className="sync-run-meta">
                   <strong>{run.projectCount} 项目</strong>

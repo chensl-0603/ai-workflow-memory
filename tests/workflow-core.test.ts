@@ -50,7 +50,7 @@ import {
 import { toDateKey } from "../lib/paths.ts";
 import { getGoalBoard } from "../lib/goals.ts";
 import { getStrategyBoard } from "../lib/strategy.ts";
-import { diagnoseSyncFailure, getRecentSyncRuns, getSyncAudit, getSyncStatus, syncObsidian } from "../lib/sync.ts";
+import { diagnoseSyncFailure, getRecentSyncRuns, getSyncAudit, getSyncSnapshots, getSyncStatus, syncObsidian } from "../lib/sync.ts";
 import { getInitialSyncControlState, getRetryableSyncRunId } from "../lib/sync-console-state.ts";
 import { ensureDatabase } from "../lib/db.ts";
 import { getSourceHealthReport } from "../lib/source-health.ts";
@@ -2099,6 +2099,35 @@ test("records sync run history after Obsidian sync", async () => {
     assert.equal(runs[0]?.projectCount, 3);
     assert.match(runs[0]?.ranAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
     assert.equal(runs[0]?.message.includes("Daily"), true);
+    assert.equal(runs[0]?.snapshotSummary?.beforeTargets, 6);
+    assert.equal(runs[0]?.snapshotSummary?.afterTargets, 6);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("records before and after target snapshots for successful Obsidian sync", async () => {
+  const fixture = await makeFixtureDir();
+  try {
+    await ingestAllSources(fixture);
+
+    await syncObsidian({
+      dbPath: fixture.dbPath,
+      obsidianVault: fixture.obsidianVault,
+      today: "2026-05-30"
+    });
+    const runs = await getRecentSyncRuns(fixture.dbPath, 1);
+    const snapshots = await getSyncSnapshots(fixture.dbPath, { syncRunId: runs[0]?.id ?? "" });
+    const before = snapshots.items.filter((item) => item.phase === "before");
+    const after = snapshots.items.filter((item) => item.phase === "after");
+
+    assert.equal(before.length, 6);
+    assert.equal(after.length, 6);
+    assert.equal(before.every((item) => !item.exists), true);
+    assert.equal(after.every((item) => item.exists), true);
+    assert.equal(snapshots.summary.beforeExistingTargets, 0);
+    assert.equal(snapshots.summary.afterExistingTargets, 6);
+    assert.equal(snapshots.summary.changedTargets >= 6, true);
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }
@@ -2119,6 +2148,7 @@ test("records failed sync run history when Obsidian sync cannot write", async ()
       })
     );
     const runs = await getRecentSyncRuns(fixture.dbPath, 5);
+    const snapshots = await getSyncSnapshots(fixture.dbPath, { syncRunId: runs[0]?.id ?? "" });
 
     assert.equal(runs.length, 1);
     assert.equal(runs[0]?.date, "2026-05-30");
@@ -2129,6 +2159,8 @@ test("records failed sync run history when Obsidian sync cannot write", async ()
     assert.match(runs[0]?.diagnosis?.suggestion ?? "", /文件夹/);
     assert.match(runs[0]?.ranAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
     assert.equal((runs[0]?.message.length ?? 0) > 0, true);
+    assert.equal(snapshots.items.some((item) => item.phase === "before"), true);
+    assert.equal(snapshots.items.some((item) => item.phase === "failure"), true);
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }

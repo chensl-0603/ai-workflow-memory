@@ -146,6 +146,19 @@ export async function ensureDatabase(dbPath: string) {
       failure_stage TEXT,
       ran_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS sync_target_snapshots (
+      id TEXT PRIMARY KEY,
+      sync_run_id TEXT NOT NULL,
+      phase TEXT NOT NULL,
+      target_kind TEXT NOT NULL,
+      target_label TEXT NOT NULL,
+      target_path TEXT NOT NULL,
+      file_exists INTEGER NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      updated_at TEXT,
+      captured_at TEXT NOT NULL
+    );
   `);
   const columns = db.prepare("PRAGMA table_info(conversations)").all() as { name: string }[];
   if (!columns.some((column) => column.name === "tags")) {

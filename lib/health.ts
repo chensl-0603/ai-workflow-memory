@@ -1,7 +1,8 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { spawn } from "node:child_process";
+import path from "node:path";
 
-import type { HealthCheckResult } from "./types.ts";
+import type { HealthCheckResult, ProjectSnapshot } from "./types.ts";
 
 export type CommandCheck = {
   id: string;
@@ -9,17 +10,28 @@ export type CommandCheck = {
   command: string;
   args: string[];
   required: boolean;
+  cwd?: string;
 };
 
 export type HealthOptions = {
   envFiles?: (string | EnvFileCheck)[];
   commands?: CommandCheck[];
+  files?: FileCheck[];
 };
 
 export type EnvFileCheck = {
   id: string;
   label: string;
   path: string;
+};
+
+export type FileCheck = {
+  id: string;
+  label: string;
+  paths: string[];
+  missingDetail: string;
+  suggestion: string;
+  required?: boolean;
 };
 
 const defaultCommands: CommandCheck[] = [
@@ -64,11 +76,11 @@ function runCommand(check: CommandCheck): Promise<HealthCheckResult> {
 
 function spawnCheckCommand(check: CommandCheck) {
   if (process.platform !== "win32") {
-    return spawn(check.command, check.args, { shell: false });
+    return spawn(check.command, check.args, { cwd: check.cwd, shell: false });
   }
 
   const commandLine = [check.command, ...check.args].map(quoteWindowsArg).join(" ");
-  return spawn("cmd.exe", ["/d", "/c", commandLine], { shell: false });
+  return spawn("cmd.exe", ["/d", "/c", commandLine], { cwd: check.cwd, shell: false });
 }
 
 function unavailableResult(check: CommandCheck): HealthCheckResult {
@@ -123,12 +135,133 @@ async function checkEnvFile(value: string | EnvFileCheck, index: number): Promis
   }
 }
 
+async function checkFile(value: FileCheck): Promise<HealthCheckResult> {
+  for (const filePath of value.paths) {
+    try {
+      await stat(filePath);
+      return {
+        id: value.id,
+        label: value.label,
+        status: "ok",
+        detail: `已找到 ${filePath}`,
+        suggestion: null
+      };
+    } catch {
+    }
+  }
+
+  return {
+    id: value.id,
+    label: value.label,
+    status: value.required ? "fail" : "warn",
+    detail: value.missingDetail,
+    suggestion: value.suggestion
+  };
+}
+
+function projectHasTech(project: ProjectSnapshot, tech: string) {
+  return project.techStack.some((item) => item.toLocaleLowerCase("zh-CN") === tech.toLocaleLowerCase("zh-CN"));
+}
+
+function projectToolCheck(project: ProjectSnapshot, tool: {
+  id: string;
+  label: string;
+  command: string;
+  args: string[];
+  required: boolean;
+}): CommandCheck {
+  return {
+    id: `tool:${project.name}:${tool.id}`,
+    label: `${project.name} ${tool.label}`,
+    command: tool.command,
+    args: tool.args,
+    required: tool.required,
+    cwd: project.path
+  };
+}
+
+function buildProjectCommandChecks(project: ProjectSnapshot): CommandCheck[] {
+  const checks: CommandCheck[] = [];
+  if (projectHasTech(project, "Node.js") || projectHasTech(project, "Next.js")) {
+    checks.push(
+      projectToolCheck(project, { id: "node", label: "Node.js", command: "node", args: ["--version"], required: true }),
+      projectToolCheck(project, { id: "npm", label: "npm", command: "npm", args: ["--version"], required: true })
+    );
+  }
+  if (projectHasTech(project, "Python")) {
+    checks.push(projectToolCheck(project, { id: "python", label: "Python", command: "python", args: ["--version"], required: true }));
+  }
+  if (projectHasTech(project, "Java")) {
+    checks.push(projectToolCheck(project, { id: "java", label: "Java", command: "java", args: ["-version"], required: true }));
+  }
+  if (projectHasTech(project, "Maven")) {
+    checks.push(projectToolCheck(project, { id: "maven", label: "Maven", command: "mvn", args: ["--version"], required: true }));
+  }
+  if (projectHasTech(project, "Gradle")) {
+    checks.push(projectToolCheck(project, { id: "gradle", label: "Gradle", command: "gradle", args: ["--version"], required: true }));
+  }
+  return checks;
+}
+
+function buildProjectFileChecks(project: ProjectSnapshot): FileCheck[] {
+  const checks: FileCheck[] = [];
+  if (projectHasTech(project, "Maven")) {
+    checks.push({
+      id: `file:${project.name}:maven-wrapper`,
+      label: `${project.name} Maven wrapper`,
+      paths: [path.join(project.path, "mvnw"), path.join(project.path, "mvnw.cmd")],
+      missingDetail: "未找到 mvnw 或 mvnw.cmd",
+      suggestion: "补充 Maven wrapper，避免只依赖本机全局 Maven"
+    });
+  }
+  if (projectHasTech(project, "Gradle")) {
+    checks.push({
+      id: `file:${project.name}:gradle-wrapper`,
+      label: `${project.name} Gradle wrapper`,
+      paths: [path.join(project.path, "gradlew"), path.join(project.path, "gradlew.bat")],
+      missingDetail: "未找到 gradlew 或 gradlew.bat",
+      suggestion: "补充 Gradle wrapper，避免只依赖本机全局 Gradle"
+    });
+  }
+  return checks;
+}
+
+function buildProjectEnvChecks(projects: ProjectSnapshot[]): EnvFileCheck[] {
+  return projects
+    .filter((project) => projectHasTech(project, "Next.js") || projectHasTech(project, "Node.js"))
+    .map((project) => ({
+      id: `env:${project.name}`,
+      label: `${project.name} 环境变量文件`,
+      path: path.join(project.path, ".env.local")
+    }));
+}
+
+export function buildProjectHealthOptions(projects: ProjectSnapshot[]): HealthOptions {
+  return {
+    commands: projects.flatMap(buildProjectCommandChecks),
+    envFiles: buildProjectEnvChecks(projects),
+    files: projects.flatMap(buildProjectFileChecks)
+  };
+}
+
+export function projectNameFromHealthCheckId(id: string) {
+  if (id.startsWith("env:")) return id.slice("env:".length);
+  const prefix = id.startsWith("tool:") ? "tool:" : id.startsWith("file:") ? "file:" : null;
+  if (!prefix) return null;
+  const rest = id.slice(prefix.length);
+  const delimiter = rest.lastIndexOf(":");
+  if (delimiter <= 0) return null;
+  return rest.slice(0, delimiter);
+}
+
 export async function runHealthChecks(options: HealthOptions = {}): Promise<HealthCheckResult[]> {
   const commands = options.commands ?? defaultCommands;
   const envFiles = options.envFiles ?? [];
-  const [commandChecks, envChecks] = await Promise.all([
+  const files = options.files ?? [];
+  const [commandChecks, envChecks, fileChecks] = await Promise.all([
     Promise.all(commands.map(runCommand)),
-    Promise.all(envFiles.map(checkEnvFile))
+    Promise.all(envFiles.map(checkEnvFile)),
+    Promise.all(files.map(checkFile))
   ]);
-  return [...commandChecks, ...envChecks];
+  return [...commandChecks, ...envChecks, ...fileChecks];
 }

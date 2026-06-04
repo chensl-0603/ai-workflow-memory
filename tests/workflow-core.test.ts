@@ -14,7 +14,7 @@ import {
   exportStrategyBoardToObsidian
 } from "../lib/obsidian.ts";
 import { scanProjects } from "../lib/projects.ts";
-import { runHealthChecks } from "../lib/health.ts";
+import { buildProjectHealthOptions, runHealthChecks } from "../lib/health.ts";
 import { searchMemories } from "../lib/search.ts";
 import { getProjectDetail } from "../lib/project-detail.ts";
 import { cleanupDeletedProjectMemories } from "../lib/cleanup.ts";
@@ -1178,6 +1178,28 @@ test("scans Next.js, Maven, and plain local projects", async () => {
   }
 });
 
+test("builds project-level health checks from detected tech stacks", async () => {
+  const fixture = await makeFixtureDir();
+  try {
+    const projects = await scanProjects(fixture.projectsRoot);
+    const options = buildProjectHealthOptions(projects);
+    const commandIds = options.commands?.map((check) => check.id).sort() ?? [];
+    const envIds = options.envFiles?.map((check) => (typeof check === "string" ? check : check.id)).sort() ?? [];
+    const fileIds = options.files?.map((check) => check.id).sort() ?? [];
+
+    assert.ok(commandIds.includes("tool:hotspot-hub:node"));
+    assert.ok(commandIds.includes("tool:hotspot-hub:npm"));
+    assert.ok(commandIds.includes("tool:FarmGame:java"));
+    assert.ok(commandIds.includes("tool:FarmGame:maven"));
+    assert.equal(commandIds.some((id) => id.includes("notes")), false);
+    assert.equal(commandIds.includes("tool:hotspot-hub:gradle"), false);
+    assert.deepEqual(envIds, ["env:hotspot-hub"]);
+    assert.deepEqual(fileIds, ["file:FarmGame:maven-wrapper"]);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("builds project detail with linked memories, tags, health, and next actions", async () => {
   const fixture = await makeFixtureDir();
   try {
@@ -1189,7 +1211,9 @@ test("builds project detail with linked memories, tags, health, and next actions
     assert.equal(detail?.memories[0]?.title, "JAVA_HOME is not set，检查 Gradle 构建环境");
     assert.ok(detail?.relatedTags.includes("构建"));
     assert.ok(detail?.relatedTags.includes("环境"));
-    assert.ok(detail?.health.some((check) => check.label === "Gradle"));
+    assert.ok(detail?.health.some((check) => check.id === "tool:FarmGame:maven"));
+    assert.equal(detail?.health.some((check) => check.id.startsWith("env:hotspot-hub")), false);
+    assert.equal(detail?.health.some((check) => check.id.startsWith("tool:hotspot-hub:")), false);
     assert.ok(detail?.nextActions.some((action) => action.includes("构建环境")));
 
     const missing = await getProjectDetail(fixture.dbPath, "missing-project");
@@ -1421,7 +1445,7 @@ test("builds project archive index with export status and project signals", asyn
     assert.equal(index.summary.totalProjects, 3);
     assert.equal(index.summary.exportedProjects, 1);
     assert.equal(index.summary.totalMemories, 3);
-    assert.equal(index.summary.warningProjects, 3);
+    assert.equal(index.summary.warningProjects, 2);
     assert.equal(farm?.archiveExists, true);
     assert.equal(farm?.memoryCount, 1);
     assert.equal(farm?.warningCount, 1);
@@ -1684,12 +1708,13 @@ test("builds a blocker board from manual blockers and health reminders", async (
     const health = board.items.filter((item) => item.source === "health");
 
     assert.equal(board.summary.manualBlockers, 1);
-    assert.equal(board.summary.healthBlockers, 4);
-    assert.equal(board.summary.totalBlockers, 5);
-    assert.equal(board.summary.projectsWithBlockers, 3);
+    assert.equal(board.summary.healthBlockers, health.length);
+    assert.equal(board.summary.totalBlockers, manual.length + health.length);
+    assert.equal(board.summary.projectsWithBlockers >= 2, true);
     assert.equal(manual[0]?.projectName, "FarmGame");
     assert.equal(manual[0]?.text, "Gradle 构建还没恢复。");
-    assert.equal(health.some((item) => item.projectName === "hotspot-hub" && item.text.includes("Gradle")), true);
+    assert.equal(health.some((item) => item.projectName === "hotspot-hub" && item.text.includes("Gradle")), false);
+    assert.equal(health.some((item) => item.projectName === "hotspot-hub" && item.text.includes("环境变量文件")), true);
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }

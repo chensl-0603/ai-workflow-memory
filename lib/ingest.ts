@@ -1,12 +1,11 @@
 import { stat } from "node:fs/promises";
-import path from "node:path";
 
 import type { AppConfig, ConversationItem, HealthCheckResult, ProjectSnapshot, SourceHealthItem } from "./types.ts";
 import { cleanupDeletedProjectMemories } from "./cleanup.ts";
 import { ensureDatabase } from "./db.ts";
 import { readClaudeConversations, readCodexConversations } from "./conversations.ts";
 import { scanProjects } from "./projects.ts";
-import { runHealthChecks } from "./health.ts";
+import { buildProjectHealthOptions, runHealthChecks } from "./health.ts";
 import { collectSourceHealth } from "./source-health.ts";
 
 async function projectPathExists(projectPath: string | null) {
@@ -100,16 +99,6 @@ function upsertSourceHealth(db: Awaited<ReturnType<typeof ensureDatabase>>, sour
   ).run(source.source, source.path, source.exists ? 1 : 0, source.itemCount, source.latestUpdatedAt, source.checkedAt, source.detail);
 }
 
-function buildProjectEnvChecks(projects: ProjectSnapshot[]) {
-  return projects
-    .filter((project) => project.techStack.some((tech) => tech === "Next.js" || tech === "Node.js"))
-    .map((project) => ({
-      id: `env:${project.name}`,
-      label: `${project.name} 环境变量文件`,
-      path: path.join(project.path, ".env.local")
-    }));
-}
-
 export async function ingestAllSources(config: AppConfig) {
   const cleanup = await cleanupDeletedProjectMemories(config.dbPath);
   const db = await ensureDatabase(config.dbPath);
@@ -120,9 +109,7 @@ export async function ingestAllSources(config: AppConfig) {
       scanProjects(config.projectsRoot),
       collectSourceHealth(config)
     ]);
-    const health = await runHealthChecks({
-      envFiles: buildProjectEnvChecks(projects)
-    });
+    const health = await runHealthChecks(buildProjectHealthOptions(projects));
 
     const uniqueConversations = new Map<string, ConversationItem>();
     const staleDeletedProjectConversationIds: string[] = [];

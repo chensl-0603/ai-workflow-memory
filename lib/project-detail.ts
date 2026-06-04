@@ -1,4 +1,5 @@
 import { ensureDatabase } from "./db.ts";
+import { projectNameFromHealthCheckId } from "./health.ts";
 import { searchMemories } from "./search.ts";
 import type { HealthCheckResult, ProjectDetail, ProjectSnapshot } from "./types.ts";
 
@@ -102,10 +103,10 @@ export async function getProjectDetail(dbPath: string, projectName: string): Pro
       )
       .all() as HealthRow[];
     const health = healthRows.map(toHealth).filter((check) => {
-      if (check.id.startsWith("env:")) {
-        return check.id.toLocaleLowerCase("zh-CN") === `env:${project.name}`.toLocaleLowerCase("zh-CN");
+      const scopedProjectName = projectNameFromHealthCheckId(check.id);
+      if (scopedProjectName) {
+        return scopedProjectName.toLocaleLowerCase("zh-CN") === project.name.toLocaleLowerCase("zh-CN");
       }
-      if (check.status !== "ok") return true;
       return relatedTags.some((tag) => check.label.toLocaleLowerCase("zh-CN").includes(tag.toLocaleLowerCase("zh-CN")));
     });
 

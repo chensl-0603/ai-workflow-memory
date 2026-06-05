@@ -16,7 +16,7 @@ import { getDailyReview } from "./review.ts";
 import { getStrategyBoard } from "./strategy.ts";
 import { getLatestProjectKnowledgeSnapshot } from "./project-knowledge.ts";
 import { getLatestProjectPhaseReview } from "./phase-reviews.ts";
-import type { ProjectKnowledgeSnapshot, ProjectPhaseReview } from "./types.ts";
+import type { DailyActionEvidence, ProjectKnowledgeSnapshot, ProjectPhaseReview } from "./types.ts";
 
 const generatedStart = "<!-- AUTO_GENERATED_START -->";
 const generatedEnd = "<!-- AUTO_GENERATED_END -->";
@@ -35,6 +35,34 @@ const actionPriorityLabels = {
   medium: "中",
   low: "低"
 } as const;
+
+const actionEvidenceKindLabels = {
+  commit: "提交",
+  test: "测试",
+  sync: "同步",
+  manual: "手动"
+} as const;
+
+const actionEvidenceStatusLabels = {
+  ok: "通过",
+  fail: "失败",
+  unknown: "未标记"
+} as const;
+
+const actionEscalationLabels = {
+  blocker: "阻塞",
+  risk: "风险"
+} as const;
+
+function renderActionEvidence(evidence: DailyActionEvidence[], fallback: string) {
+  if (evidence.length === 0) return fallback;
+  return evidence
+    .map((item) => {
+      const ref = item.ref ? `；引用：${item.ref}` : "";
+      return `${actionEvidenceKindLabels[item.kind]}-${actionEvidenceStatusLabels[item.status]} ${item.label}：${item.detail}${ref}`;
+    })
+    .join("；");
+}
 
 function keepManualSection(existing: string | null) {
   if (!existing) {
@@ -83,9 +111,17 @@ async function renderGeneratedMarkdown(options: {
   const actions = dailyActions.items
     .map(
       (item) =>
-        `- [${actionStatusLabels[item.status]}][${actionPriorityLabels[item.priority]}] ${item.title}：${item.detail}（原因：${item.reason}；完成证据：${item.completionEvidence}）`
+        `- [${actionStatusLabels[item.status]}][${actionPriorityLabels[item.priority]}] ${item.title}：${item.detail}（原因：${item.reason}；完成证据：${renderActionEvidence(item.evidence, item.completionEvidence)}）`
     )
     .join("\n") || "- 暂无行动建议。";
+  const completedActions = dailyActions.items
+    .filter((item) => item.status === "done")
+    .map((item) => {
+      const source = item.evidenceSource ? `；来源：${item.evidenceSource}` : "";
+      const completedAt = item.completedAt ? `；完成于：${item.completedAt}` : "";
+      return `- ${item.title}：${item.detail}（${renderActionEvidence(item.evidence, item.completionEvidence)}${source}${completedAt}）`;
+    })
+    .join("\n") || "- 今天还没有记录已完成行动。";
   const conversations = review.conversations
     .slice(0, 12)
     .map((item) => `- ${item.source === "codex" ? "Codex" : "Claude"}：${item.title}`)
@@ -117,6 +153,9 @@ async function renderGeneratedMarkdown(options: {
     "",
     "## 今日行动",
     actions,
+    "",
+    "## 已完成行动",
+    completedActions,
     "",
     "## 对话记忆",
     conversations,
@@ -161,18 +200,31 @@ function renderActionInboxMarkdown(inbox: Awaited<ReturnType<typeof getActionInb
       .map((item) => {
         const project = item.projectName ? `（${item.projectName}）` : "";
         const repeated = item.count > 1 ? `，出现 ${item.count} 次：${item.dates.join(", ")}` : "";
-        return `- ${item.latestDate} [${actionStatusLabels[item.status]}][${actionPriorityLabels[item.priority]}] ${item.title}${project}：${item.detail}${repeated}（原因：${item.reason}；完成证据：${item.completionEvidence}）`;
+        const escalation = item.escalation.level ? `；升级：${actionEscalationLabels[item.escalation.level]}（${item.escalation.reason}）` : "";
+        return `- ${item.latestDate} [${actionStatusLabels[item.status]}][${actionPriorityLabels[item.priority]}] ${item.title}${project}：${item.detail}${repeated}${escalation}（原因：${item.reason}；完成证据：${renderActionEvidence(item.evidence, item.completionEvidence)}）`;
       })
       .join("\n") || "- 暂无未完成行动。";
+  const completed =
+    inbox.completedItems
+      .map((item) => {
+        const project = item.projectName ? `（${item.projectName}）` : "";
+        const source = item.evidenceSource ? `；来源：${item.evidenceSource}` : "";
+        const completedAt = item.completedAt ? `；完成于：${item.completedAt}` : "";
+        return `- ${item.date} [${actionPriorityLabels[item.priority]}] ${item.title}${project}：${renderActionEvidence(item.evidence, item.completionEvidence)}${source}${completedAt}`;
+      })
+      .join("\n") || "- 暂无已完成行动证据。";
 
   return [
     generatedStart,
     "# 行动收件箱",
     "",
-    `> ${today}：当前 ${inbox.summary.groupedActions} 组未完成行动，来自 ${inbox.summary.totalActions} 条原始行动，${inbox.summary.snoozedActions} 个已延后，覆盖 ${inbox.summary.datesWithActions} 个复盘日。`,
+    `> ${today}：当前 ${inbox.summary.groupedActions} 组未完成行动，来自 ${inbox.summary.totalActions} 条原始行动，${inbox.summary.snoozedActions} 个已延后，最近记录 ${inbox.summary.completedActions} 个已完成行动，覆盖 ${inbox.summary.datesWithActions} 个复盘日。`,
     "",
     "## 未完成行动",
     actions,
+    "",
+    "## 最近完成",
+    completed,
     generatedEnd
   ].join("\n");
 }

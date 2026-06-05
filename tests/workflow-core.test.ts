@@ -1889,6 +1889,104 @@ test("persists daily action status by stable action id", async () => {
   }
 });
 
+test("records structured action completion evidence and cites completed actions", async () => {
+  const fixture = await makeFixtureDir();
+  try {
+    await ingestAllSources(fixture);
+    await syncObsidian({
+      dbPath: fixture.dbPath,
+      obsidianVault: fixture.obsidianVault,
+      today: "2026-05-30"
+    });
+    const runs = await getRecentSyncRuns(fixture.dbPath, 1);
+    const actions = await getDailyActions({
+      dbPath: fixture.dbPath,
+      obsidianVault: fixture.obsidianVault,
+      date: "2026-05-30",
+      limit: 5
+    });
+    const memoryAction = actions.items.find((item) => item.kind === "memory");
+
+    await setDailyActionStatus({
+      dbPath: fixture.dbPath,
+      date: "2026-05-30",
+      actionId: memoryAction?.id ?? "",
+      status: "done",
+      evidenceSource: "codex-completion",
+      completedAt: "2026-06-05T17:00:00.000Z",
+      evidence: [
+        {
+          kind: "commit",
+          label: "提交 7089592",
+          detail: "新增阶段复盘自动化",
+          ref: "7089592",
+          status: "ok",
+          recordedAt: "2026-06-05T17:00:00.000Z"
+        },
+        {
+          kind: "test",
+          label: "npm test",
+          detail: "61/61 pass",
+          ref: null,
+          status: "ok",
+          recordedAt: "2026-06-05T17:01:00.000Z"
+        },
+        {
+          kind: "sync",
+          label: "Obsidian 同步",
+          detail: "Daily 和 Actions 已写入",
+          ref: runs[0]?.id ?? null,
+          status: "ok",
+          recordedAt: runs[0]?.ranAt ?? "2026-06-05T17:02:00.000Z"
+        }
+      ]
+    });
+
+    const updatedActions = await getDailyActions({
+      dbPath: fixture.dbPath,
+      obsidianVault: fixture.obsidianVault,
+      date: "2026-05-30",
+      limit: 5
+    });
+    const completed = updatedActions.items.find((item) => item.id === memoryAction?.id);
+    const inbox = await getActionInbox({
+      dbPath: fixture.dbPath,
+      obsidianVault: fixture.obsidianVault,
+      today: "2026-05-30"
+    });
+    const dailyPath = await exportDailyReviewToObsidian({
+      dbPath: fixture.dbPath,
+      obsidianVault: fixture.obsidianVault,
+      date: "2026-05-30"
+    });
+    const actionsPath = await exportActionInboxToObsidian({
+      dbPath: fixture.dbPath,
+      obsidianVault: fixture.obsidianVault,
+      today: "2026-05-30"
+    });
+    const dailyMarkdown = await readFile(dailyPath, "utf8");
+    const actionsMarkdown = await readFile(actionsPath, "utf8");
+
+    assert.equal(completed?.status, "done");
+    assert.equal(completed?.evidenceSource, "codex-completion");
+    assert.equal(completed?.completedAt, "2026-06-05T17:00:00.000Z");
+    assert.deepEqual(completed?.evidence.map((item) => item.kind), ["commit", "test", "sync"]);
+    assert.equal(inbox.summary.completedActions, 1);
+    assert.equal(inbox.completedItems[0]?.id, memoryAction?.id);
+    assert.match(dailyMarkdown, /## 已完成行动/);
+    assert.match(dailyMarkdown, /提交 7089592/);
+    assert.match(dailyMarkdown, /npm test/);
+    assert.match(dailyMarkdown, /Obsidian 同步/);
+    assert.match(actionsMarkdown, /## 最近完成/);
+    assert.match(actionsMarkdown, /codex-completion/);
+    assert.match(actionsMarkdown, /7089592/);
+    assert.match(actionsMarkdown, /61\/61 pass/);
+    assert.match(actionsMarkdown, new RegExp(runs[0]?.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") ?? "sync:"));
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("builds daily api payload with review fields and action suggestions", async () => {
   const fixture = await makeFixtureDir();
   try {
@@ -2030,12 +2128,18 @@ test("groups repeated action inbox items across review dates", async () => {
       today: "2026-05-31"
     });
     const groupedBlocker = inbox.groups.find((group) => group.kind === "blocker" && group.projectName === "FarmGame");
+    const groupedArchive = inbox.groups.find((group) => group.kind === "archive" && group.count > 1);
 
     assert.ok(groupedBlocker);
     assert.equal(groupedBlocker?.count, 4);
     assert.equal(groupedBlocker?.latestDate, "2026-05-31");
     assert.deepEqual(groupedBlocker?.dates, ["2026-05-31", "2026-05-30", "2026-05-29", "2026-05-28"]);
     assert.equal(groupedBlocker?.status, repeatedBlocker ? "snoozed" : "open");
+    assert.equal(groupedBlocker?.escalation.level, "blocker");
+    assert.match(groupedBlocker?.escalation.reason ?? "", /重复出现 4 次/);
+    assert.ok(groupedArchive);
+    assert.equal(groupedArchive?.escalation.level, "risk");
+    assert.match(groupedArchive?.escalation.reason ?? "", /重复出现/);
     assert.equal(inbox.summary.groupedActions < inbox.summary.totalActions, true);
   } finally {
     await rm(fixture.root, { recursive: true, force: true });

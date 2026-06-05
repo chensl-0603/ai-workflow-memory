@@ -376,6 +376,17 @@ export type BlockerBoard = {
 export type DailyActionKind = "blocker" | "archive" | "memory" | "health";
 export type DailyActionStatus = "open" | "done" | "skipped" | "snoozed";
 export type DailyActionPriority = "high" | "medium" | "low";
+export type DailyActionEvidenceKind = "commit" | "test" | "sync" | "manual";
+export type DailyActionEvidenceStatus = "ok" | "fail" | "unknown";
+
+export type DailyActionEvidence = {
+  kind: DailyActionEvidenceKind;
+  label: string;
+  detail: string;
+  ref: string | null;
+  status: DailyActionEvidenceStatus;
+  recordedAt: string;
+};
 
 export type DailyActionItem = {
   id: string;
@@ -388,6 +399,9 @@ export type DailyActionItem = {
   href: string;
   projectName: string | null;
   status: DailyActionStatus;
+  evidence: DailyActionEvidence[];
+  evidenceSource: string | null;
+  completedAt: string | null;
 };
 
 export type DailyActions = {
@@ -395,6 +409,7 @@ export type DailyActions = {
   summary: {
     totalActions: number;
     openActions: number;
+    completedActions: number;
     date: string;
   };
 };
@@ -426,10 +441,12 @@ export type DailyFocus = {
   projectProgress: DailyProjectProgress[];
   repeatedBlockers: DailyRepeatedBlocker[];
   nextSteps: DailyActionItem[];
+  completedActions: DailyActionItem[];
   summary: {
     progressedProjects: number;
     repeatedBlockers: number;
     nextSteps: number;
+    completedActions: number;
   };
 };
 
@@ -460,6 +477,11 @@ export type ActionInboxItem = DailyActionItem & {
   date: string;
 };
 
+export type ActionInboxEscalation = {
+  level: "blocker" | "risk" | null;
+  reason: string | null;
+};
+
 export type ActionInboxGroup = {
   key: string;
   kind: DailyActionKind;
@@ -471,6 +493,10 @@ export type ActionInboxGroup = {
   reason: string;
   completionEvidence: string;
   status: DailyActionStatus;
+  evidence: DailyActionEvidence[];
+  evidenceSource: string | null;
+  completedAt: string | null;
+  escalation: ActionInboxEscalation;
   latestDate: string;
   dates: string[];
   count: number;
@@ -478,12 +504,14 @@ export type ActionInboxGroup = {
 
 export type ActionInbox = {
   items: ActionInboxItem[];
+  completedItems: ActionInboxItem[];
   groups: ActionInboxGroup[];
   summary: {
     totalActions: number;
     groupedActions: number;
     openActions: number;
     snoozedActions: number;
+    completedActions: number;
     datesWithActions: number;
   };
 };

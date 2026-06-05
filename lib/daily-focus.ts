@@ -62,15 +62,18 @@ export function buildDailyFocus(input: { review: DailyReview; actions: DailyActi
   const repeatedBlockers = buildRepeatedBlockers(input.inbox).slice(0, 5);
   const openSteps = input.actions.items.filter((item) => item.status === "open");
   const nextSteps = (openSteps.length > 0 ? openSteps : input.actions.items.filter((item) => item.status === "snoozed")).slice(0, 3);
+  const completedActions = input.actions.items.filter((item) => item.status === "done").slice(0, 5);
 
   return {
     projectProgress,
     repeatedBlockers,
     nextSteps,
+    completedActions,
     summary: {
       progressedProjects: projectProgress.length,
       repeatedBlockers: repeatedBlockers.length,
-      nextSteps: nextSteps.length
+      nextSteps: nextSteps.length,
+      completedActions: completedActions.length
     }
   };
 }

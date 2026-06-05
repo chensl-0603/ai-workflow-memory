@@ -147,6 +147,9 @@ export async function ensureDatabase(dbPath: string) {
       date TEXT NOT NULL,
       action_id TEXT NOT NULL,
       status TEXT NOT NULL,
+      evidence TEXT NOT NULL DEFAULT '[]',
+      evidence_source TEXT,
+      completed_at TEXT,
       updated_at TEXT NOT NULL,
       PRIMARY KEY (date, action_id)
     );
@@ -203,6 +206,16 @@ export async function ensureDatabase(dbPath: string) {
   const syncRunColumns = db.prepare("PRAGMA table_info(sync_runs)").all() as { name: string }[];
   if (!syncRunColumns.some((column) => column.name === "failure_stage")) {
     db.exec("ALTER TABLE sync_runs ADD COLUMN failure_stage TEXT");
+  }
+  const dailyActionStatusColumns = db.prepare("PRAGMA table_info(daily_action_statuses)").all() as { name: string }[];
+  if (!dailyActionStatusColumns.some((column) => column.name === "evidence")) {
+    db.exec("ALTER TABLE daily_action_statuses ADD COLUMN evidence TEXT NOT NULL DEFAULT '[]'");
+  }
+  if (!dailyActionStatusColumns.some((column) => column.name === "evidence_source")) {
+    db.exec("ALTER TABLE daily_action_statuses ADD COLUMN evidence_source TEXT");
+  }
+  if (!dailyActionStatusColumns.some((column) => column.name === "completed_at")) {
+    db.exec("ALTER TABLE daily_action_statuses ADD COLUMN completed_at TEXT");
   }
   backfillEmptyConversationSummaries(db);
   return db;

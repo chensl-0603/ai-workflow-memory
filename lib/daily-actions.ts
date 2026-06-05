@@ -127,13 +127,17 @@ export async function getDailyActions(options: {
       detail: cleanItem.detail,
       projectName: cleanItem.projectName
     });
+    const statusRecord = statusById.get(id);
 
     return {
       id,
       ...cleanItem,
       reason: cleanActionText(cleanItem.reason),
       completionEvidence: cleanActionText(cleanItem.completionEvidence),
-      status: statusById.get(id) ?? "open"
+      status: statusRecord?.status ?? "open",
+      evidence: statusRecord?.evidence ?? [],
+      evidenceSource: statusRecord?.evidenceSource ?? null,
+      completedAt: statusRecord?.completedAt ?? null
     };
   });
 
@@ -142,6 +146,7 @@ export async function getDailyActions(options: {
     summary: {
       totalActions: items.length,
       openActions: items.filter((item) => item.status === "open").length,
+      completedActions: items.filter((item) => item.status === "done").length,
       date: options.date
     }
   };

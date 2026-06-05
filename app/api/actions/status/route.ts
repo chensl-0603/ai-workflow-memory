@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { setDailyActionStatus } from "../../../../lib/action-status.ts";
 import { defaultConfig, toDateKey } from "../../../../lib/paths.ts";
-import type { DailyActionStatus } from "../../../../lib/types.ts";
+import type { DailyActionEvidence, DailyActionStatus } from "../../../../lib/types.ts";
 
 const validStatuses = new Set<DailyActionStatus>(["open", "done", "skipped", "snoozed"]);
 
@@ -12,6 +12,9 @@ export async function POST(request: NextRequest) {
       date?: string;
       actionId?: string;
       status?: DailyActionStatus;
+      evidence?: DailyActionEvidence[];
+      evidenceSource?: string | null;
+      completedAt?: string | null;
     };
     const date = body.date ?? toDateKey(new Date());
     if (!body.actionId) {
@@ -25,7 +28,10 @@ export async function POST(request: NextRequest) {
       dbPath: defaultConfig.dbPath,
       date,
       actionId: body.actionId,
-      status: body.status
+      status: body.status,
+      evidence: body.evidence,
+      evidenceSource: body.evidenceSource,
+      completedAt: body.completedAt
     });
 
     return NextResponse.json({

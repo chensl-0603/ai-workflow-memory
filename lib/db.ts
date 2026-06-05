@@ -129,6 +129,20 @@ export async function ensureDatabase(dbPath: string) {
       next_milestones TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS project_phase_reviews (
+      id TEXT PRIMARY KEY,
+      project_path TEXT NOT NULL,
+      project_name TEXT NOT NULL,
+      milestone TEXT NOT NULL,
+      completed_at TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      completed_items TEXT NOT NULL,
+      verification_commands TEXT NOT NULL,
+      commits TEXT NOT NULL,
+      open_issues TEXT NOT NULL,
+      next_steps TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS daily_action_statuses (
       date TEXT NOT NULL,
       action_id TEXT NOT NULL,

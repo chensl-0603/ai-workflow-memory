@@ -273,6 +273,25 @@ export type ProjectKnowledgeSnapshot = {
   nextMilestones: string[];
 };
 
+export type ProjectPhaseReviewCommit = {
+  hash: string;
+  message: string;
+};
+
+export type ProjectPhaseReview = {
+  id: string;
+  projectPath: string;
+  projectName: string;
+  milestone: string;
+  completedAt: string;
+  summary: string;
+  completedItems: string[];
+  verificationCommands: string[];
+  commits: ProjectPhaseReviewCommit[];
+  openIssues: string[];
+  nextSteps: string[];
+};
+
 export type ProjectArchiveIndexItem = {
   project: ProjectSnapshot;
   archivePath: string;

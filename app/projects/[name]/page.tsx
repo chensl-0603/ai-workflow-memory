@@ -8,7 +8,8 @@ import { GenerateKnowledgeSnapshotButton } from "../generate-knowledge-snapshot-
 import { defaultConfig } from "../../../lib/paths.ts";
 import { getProjectArchiveIndex } from "../../../lib/project-archives.ts";
 import { getProjectDetail } from "../../../lib/project-detail.ts";
-import type { ProjectKnowledgeSnapshot } from "../../../lib/types.ts";
+import { getLatestProjectPhaseReview } from "../../../lib/phase-reviews.ts";
+import type { ProjectKnowledgeSnapshot, ProjectPhaseReview } from "../../../lib/types.ts";
 
 type PageParams = Promise<{
   name: string;
@@ -33,12 +34,13 @@ function formatDate(value: string) {
 export default async function ProjectDetailPage({ params }: { params: PageParams }) {
   const { name } = await params;
   const projectName = decodeURIComponent(name);
-  const [detail, archiveIndex] = await Promise.all([
+  const [detail, archiveIndex, latestPhaseReview] = await Promise.all([
     getProjectDetail(defaultConfig.dbPath, projectName),
     getProjectArchiveIndex({
       dbPath: defaultConfig.dbPath,
       obsidianVault: defaultConfig.obsidianVault
-    })
+    }),
+    getLatestProjectPhaseReview(defaultConfig.dbPath, projectName)
   ]);
 
   if (!detail) {
@@ -186,6 +188,18 @@ export default async function ProjectDetailPage({ params }: { params: PageParams
 
             <section className="panel">
               <div className="section-heading">
+                <h2>阶段复盘</h2>
+                <span className="muted-label">{latestPhaseReview ? formatDate(latestPhaseReview.completedAt) : "未生成"}</span>
+              </div>
+              {latestPhaseReview ? (
+                <PhaseReviewView review={latestPhaseReview} />
+              ) : (
+                <EmptyState title="还没有阶段复盘" detail="完成小目标后生成复盘草稿，记录完成内容、验证命令、提交记录和下一步。" />
+              )}
+            </section>
+
+            <section className="panel">
+              <div className="section-heading">
                 <h2>下一步建议</h2>
                 <span className="muted-label">{detail.nextActions.length} 项</span>
               </div>
@@ -250,6 +264,22 @@ function KnowledgeSnapshotView({ snapshot, stale }: { snapshot: ProjectKnowledge
       <SnapshotList title="当前架构" items={snapshot.currentArchitecture} />
       <SnapshotList title="已知缺口" items={snapshot.knownGaps} />
       <SnapshotList title="下一阶段" items={snapshot.nextMilestones} />
+    </div>
+  );
+}
+
+function PhaseReviewView({ review }: { review: ProjectPhaseReview }) {
+  return (
+    <div className="manual-section-grid">
+      <div className="manual-section">
+        <span className="muted-label">{review.milestone}</span>
+        <p>{review.summary}</p>
+      </div>
+      <SnapshotList title="完成内容" items={review.completedItems} />
+      <SnapshotList title="验证命令" items={review.verificationCommands} />
+      <SnapshotList title="提交记录" items={review.commits.map((commit) => `${commit.hash} ${commit.message}`)} />
+      <SnapshotList title="遗留问题" items={review.openIssues} />
+      <SnapshotList title="下一步" items={review.nextSteps} />
     </div>
   );
 }

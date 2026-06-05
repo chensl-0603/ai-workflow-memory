@@ -15,7 +15,8 @@ import { getProjectDetail } from "./project-detail.ts";
 import { getDailyReview } from "./review.ts";
 import { getStrategyBoard } from "./strategy.ts";
 import { getLatestProjectKnowledgeSnapshot } from "./project-knowledge.ts";
-import type { ProjectKnowledgeSnapshot } from "./types.ts";
+import { getLatestProjectPhaseReview } from "./phase-reviews.ts";
+import type { ProjectKnowledgeSnapshot, ProjectPhaseReview } from "./types.ts";
 
 const generatedStart = "<!-- AUTO_GENERATED_START -->";
 const generatedEnd = "<!-- AUTO_GENERATED_END -->";
@@ -331,6 +332,37 @@ function renderKnowledgeSnapshotMarkdown(snapshot: ProjectKnowledgeSnapshot | nu
   ].join("\n");
 }
 
+function renderPhaseReviewMarkdown(review: ProjectPhaseReview | null) {
+  if (!review) {
+    return [
+      "## 阶段复盘",
+      "- 暂无阶段复盘。完成小目标后可以生成复盘草稿。"
+    ].join("\n");
+  }
+  const commits = review.commits.map((commit) => `${commit.hash} ${commit.message}`);
+  return [
+    "## 阶段复盘",
+    `- 完成时间：${review.completedAt}`,
+    `- 小目标：${review.milestone}`,
+    `- 摘要：${review.summary}`,
+    "",
+    "### 完成内容",
+    markdownList(review.completedItems),
+    "",
+    "### 验证命令",
+    markdownList(review.verificationCommands),
+    "",
+    "### 提交记录",
+    markdownList(commits),
+    "",
+    "### 遗留问题",
+    markdownList(review.openIssues),
+    "",
+    "### 下一步",
+    markdownList(review.nextSteps)
+  ].join("\n");
+}
+
 function renderStrategyBoardMarkdown(board: Awaited<ReturnType<typeof getStrategyBoard>>, today: string) {
   const projects =
     board.items
@@ -396,7 +428,8 @@ function safeProjectFileName(projectName: string) {
 
 function renderProjectArchiveMarkdown(
   detail: NonNullable<Awaited<ReturnType<typeof getProjectDetail>>>,
-  knowledgeSnapshot: ProjectKnowledgeSnapshot | null
+  knowledgeSnapshot: ProjectKnowledgeSnapshot | null,
+  phaseReview: ProjectPhaseReview | null
 ) {
   const tags = detail.relatedTags.length > 0 ? detail.relatedTags.map((tag) => `- ${tag}`).join("\n") : "- 暂无关联标签。";
   const scripts =
@@ -451,6 +484,8 @@ function renderProjectArchiveMarkdown(
     "",
     renderKnowledgeSnapshotMarkdown(knowledgeSnapshot),
     "",
+    renderPhaseReviewMarkdown(phaseReview),
+    "",
     "## 环境提醒",
     health,
     "",
@@ -468,6 +503,7 @@ export async function exportProjectArchiveToObsidian(options: {
   const detail = await getProjectDetail(options.dbPath, options.projectName);
   if (!detail) return null;
   const knowledgeSnapshot = await getLatestProjectKnowledgeSnapshot(options.dbPath, detail.project.name);
+  const phaseReview = await getLatestProjectPhaseReview(options.dbPath, detail.project.name);
 
   const projectsDir = path.join(options.obsidianVault, "Projects");
   await mkdir(projectsDir, { recursive: true });
@@ -478,7 +514,7 @@ export async function exportProjectArchiveToObsidian(options: {
   } catch {
     existing = null;
   }
-  const next = `${renderProjectArchiveMarkdown(detail, knowledgeSnapshot)}\n\n${keepManualSection(existing)}\n`;
+  const next = `${renderProjectArchiveMarkdown(detail, knowledgeSnapshot, phaseReview)}\n\n${keepManualSection(existing)}\n`;
   await writeFile(target, next, "utf8");
   return target;
 }

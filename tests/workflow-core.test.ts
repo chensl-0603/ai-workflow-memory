@@ -55,6 +55,7 @@ import { getInitialSyncControlState, getRetryableSyncRunId } from "../lib/sync-c
 import { ensureDatabase } from "../lib/db.ts";
 import { getSourceHealthReport } from "../lib/source-health.ts";
 import { generateProjectKnowledgeSnapshot, getLatestProjectKnowledgeSnapshot } from "../lib/project-knowledge.ts";
+import { generateProjectPhaseReview, getLatestProjectPhaseReview } from "../lib/phase-reviews.ts";
 
 function assertCleanupResult(
   actual: { cleanupRunId: string | null; ignoredConversations: number; deletedConversations: number },
@@ -1396,6 +1397,17 @@ test("exports project archive while preserving manual Obsidian notes", async () 
       projectName: "FarmGame",
       capturedAt: "2026-05-30T12:00:00.000Z"
     });
+    await generateProjectPhaseReview({
+      dbPath: fixture.dbPath,
+      projectName: "FarmGame",
+      milestone: "小目标 4：开发环境监测增强",
+      completedAt: "2026-05-30T13:00:00.000Z",
+      completedItems: ["健康检查升级为项目级。"],
+      verificationCommands: ["npm test", "npm run lint", "npm run build"],
+      commits: [{ hash: "156f5a3", message: "增强项目级环境健康检查" }],
+      openIssues: ["环境趋势监测仍待实现。"],
+      nextSteps: ["推进同步和 Obsidian 稳定性。"]
+    });
     const projectsDir = path.join(fixture.obsidianVault, "Projects");
     await mkdir(projectsDir, { recursive: true });
     const target = path.join(projectsDir, "FarmGame.md");
@@ -1420,6 +1432,10 @@ test("exports project archive while preserving manual Obsidian notes", async () 
     assert.match(markdown, /恢复构建环境可见性/);
     assert.match(markdown, /当前架构/);
     assert.match(markdown, /测试信号/);
+    assert.match(markdown, /## 阶段复盘/);
+    assert.match(markdown, /小目标 4：开发环境监测增强/);
+    assert.match(markdown, /156f5a3 增强项目级环境健康检查/);
+    assert.match(markdown, /npm run build/);
     assert.match(markdown, /下一次先修 Gradle。/);
     assert.match(markdown, /<!-- AUTO_GENERATED_START -->/);
     assert.match(markdown, /<!-- MANUAL_NOTES_START -->/);
@@ -1450,6 +1466,36 @@ test("generates project knowledge snapshots from project signals", async () => {
     assert.ok(snapshot?.knownGaps.some((item) => item.includes("知识库")));
     assert.ok(snapshot?.nextMilestones.some((item) => item.includes("阶段快照")));
     assert.equal(latest?.id, snapshot?.id);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("generates project phase review drafts from completion evidence", async () => {
+  const fixture = await makeFixtureDir();
+  try {
+    await ingestAllSources(fixture);
+
+    const review = await generateProjectPhaseReview({
+      dbPath: fixture.dbPath,
+      projectName: "hotspot-hub",
+      milestone: "小目标 6：记忆防丢失二期",
+      completedAt: "2026-06-05T16:00:00.000Z",
+      completedItems: ["新增记忆正文备份状态。", "项目详情页提示记忆覆盖风险。"],
+      verificationCommands: ["npm test", "npm run lint", "npm run build"],
+      commits: [{ hash: "8f70197", message: "增强记忆可恢复性诊断" }],
+      openIssues: ["人工补摘要工作台仍待增强。"],
+      nextSteps: ["进入小目标 7：阶段复盘自动化。"]
+    });
+    const latest = await getLatestProjectPhaseReview(fixture.dbPath, "hotspot-hub");
+
+    assert.equal(review?.projectName, "hotspot-hub");
+    assert.equal(review?.milestone, "小目标 6：记忆防丢失二期");
+    assert.ok(review?.summary.includes("2 项完成内容"));
+    assert.deepEqual(review?.verificationCommands, ["npm test", "npm run lint", "npm run build"]);
+    assert.equal(review?.commits[0]?.hash, "8f70197");
+    assert.equal(latest?.id, review?.id);
+    assert.match(latest?.nextSteps[0] ?? "", /小目标 7/);
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }

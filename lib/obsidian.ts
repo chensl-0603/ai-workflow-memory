@@ -241,6 +241,12 @@ function renderMemoryQualityAuditMarkdown(options: {
     `- 标题兜底：${options.report.summary.titleFallbackSummaries}`,
     `- 人工摘要：${options.report.summary.manualSummaries}`,
     "",
+    "## 可恢复性",
+    `- 正文已备份：${options.report.summary.bodyBackedUpMemories}`,
+    `- 可补救：${options.report.summary.recoverableMemories}`,
+    `- 人工修复：${options.report.summary.manualRepairMemories}`,
+    `- 源文件缺失：${options.report.summary.sourceMissingMemories}`,
+    "",
     "## 归档候选",
     archiveGroups,
     "",
@@ -400,6 +406,18 @@ function renderProjectArchiveMarkdown(
       .slice(0, 12)
       .map((item) => `- ${item.source === "codex" ? "Codex" : "Claude"}：${item.title}`)
       .join("\n") || "- 暂无关联记忆。";
+  const memoryCoverage = [
+    `- 状态：${detail.memoryCoverage.status === "ok" ? "稳定" : detail.memoryCoverage.status === "warn" ? "注意" : "高风险"}`,
+    `- 摘要：${detail.memoryCoverage.summary}`,
+    `- 全部记忆：${detail.memoryCoverage.totalMemories}`,
+    `- 正文摘要：${detail.memoryCoverage.threadBodyMemories}`,
+    `- 标题兜底：${detail.memoryCoverage.titleFallbackMemories}`,
+    `- 人工摘要：${detail.memoryCoverage.manualMemories}`,
+    `- 源文件缺失：${detail.memoryCoverage.sourceMissingMemories}`,
+    "",
+    "### 覆盖建议",
+    markdownList(detail.memoryCoverage.suggestions)
+  ].join("\n");
   const health =
     detail.health
       .filter((check) => check.status !== "ok")
@@ -427,6 +445,9 @@ function renderProjectArchiveMarkdown(
     "",
     "## 最近记忆",
     memories,
+    "",
+    "## 记忆覆盖风险",
+    memoryCoverage,
     "",
     renderKnowledgeSnapshotMarkdown(knowledgeSnapshot),
     "",

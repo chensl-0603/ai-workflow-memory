@@ -10,6 +10,7 @@ import type {
   ArchiveCandidateKind,
   ConversationItem,
   CleanupRun,
+  MemoryQualitySignal,
   MemoryQualityIssue,
   MemoryQualityReport,
   MemoryQualitySafetyPlan,
@@ -32,6 +33,11 @@ type KeptArchiveCandidateRow = {
   title: string;
   reason: string;
   keptAt: string;
+};
+
+type SourceHealthState = {
+  exists: boolean;
+  itemCount: number;
 };
 
 const noisePatterns = [
@@ -102,7 +108,106 @@ async function getKeptArchiveCandidateIds(dbPath: string) {
   }
 }
 
-function scoreMemory(memory: ConversationItem, options: { keptArchiveCandidateIds?: Set<string> } = {}) {
+async function getSourceHealthStates(dbPath: string) {
+  const db = await ensureDatabase(dbPath);
+  try {
+    const rows = db.prepare("SELECT source, file_exists, item_count FROM source_health_checks").all() as Array<{
+      source: string;
+      file_exists: number;
+      item_count: number;
+    }>;
+    return new Map<SourceKind, SourceHealthState>(
+      rows
+        .filter((row) => row.source === "codex" || row.source === "claude")
+        .map((row) => [
+          row.source as SourceKind,
+          {
+            exists: Boolean(row.file_exists),
+            itemCount: Number(row.item_count)
+          }
+        ])
+    );
+  } finally {
+    db.close();
+  }
+}
+
+function buildBodyBackupSignal(summaryOrigin: ConversationItem["summaryOrigin"]): MemoryQualitySignal {
+  if (summaryOrigin === "thread-body") {
+    return {
+      status: "backed-up",
+      label: "正文已备份",
+      detail: "这条记忆来自线程正文，已经有可复盘的正文摘要。",
+      suggestion: null
+    };
+  }
+  if (summaryOrigin === "manual") {
+    return {
+      status: "manual-only",
+      label: "人工摘要",
+      detail: "这条记忆由人工摘要接管，后续采集不会覆盖它。",
+      suggestion: "保留人工摘要；确认不再需要人工锁定时再交回采集器。"
+    };
+  }
+  return {
+    status: "missing",
+    label: "缺少正文",
+    detail: "这条记忆只有标题级兜底摘要，尚未读到可用线程正文。",
+    suggestion: "优先人工补摘要，或检查对应源文件是否还存在。"
+  };
+}
+
+function buildRecoverabilitySignal(
+  memory: ConversationItem,
+  summaryOrigin: ConversationItem["summaryOrigin"],
+  sourceHealthStates: Map<SourceKind, SourceHealthState>
+): MemoryQualitySignal {
+  if (summaryOrigin === "thread-body") {
+    return {
+      status: "complete",
+      label: "可复盘",
+      detail: "正文摘要已写入记忆库，即使源索引变化也保留基本上下文。",
+      suggestion: null
+    };
+  }
+  if (summaryOrigin === "manual") {
+    return {
+      status: "manual-repaired",
+      label: "人工修复",
+      detail: "缺失正文已由人工摘要补齐。",
+      suggestion: null
+    };
+  }
+
+  const source = sourceHealthStates.get(memory.source);
+  if (!source) {
+    return {
+      status: "unknown-source",
+      label: "源状态未知",
+      detail: "还没有这类来源的健康检查记录，无法判断后续能否恢复正文。",
+      suggestion: "先重新采集或运行源索引健康检查，再决定补摘要顺序。"
+    };
+  }
+  if (!source.exists || source.itemCount === 0) {
+    return {
+      status: "source-missing",
+      label: "源文件缺失",
+      detail: "本地源索引不存在或为空，自动恢复正文的可能性很低。",
+      suggestion: "尽快人工补摘要；如果还有原始会话文件，先备份后再重新采集。"
+    };
+  }
+  return {
+    status: "recoverable",
+    label: "可补救",
+    detail: "源索引仍可访问，但当前没有读到正文摘要。",
+    suggestion: "优先检查会话正文路径或直接在质量页补摘要。"
+  };
+}
+
+function scoreMemory(
+  memory: ConversationItem,
+  options: { keptArchiveCandidateIds?: Set<string>; sourceHealthStates?: Map<SourceKind, SourceHealthState> } = {}
+) {
   const issues: MemoryQualityIssue[] = [];
   const summary = memory.summary.trim();
   const needsBody = /进展：仅标题索引，待补正文。/m.test(summary);
@@ -113,6 +218,7 @@ function scoreMemory(memory: ConversationItem, options: { keptArchiveCandidateId
       : memory.summaryOrigin === "title-fallback" || needsBody
         ? ("title-fallback" as const)
         : ("thread-body" as const);
+  const sourceHealthStates = options.sourceHealthStates ?? new Map<SourceKind, SourceHealthState>();
 
   if (!summary) {
     issues.push({
@@ -148,6 +254,8 @@ function scoreMemory(memory: ConversationItem, options: { keptArchiveCandidateId
   return {
     memory,
     summaryOrigin,
+    bodyBackup: buildBodyBackupSignal(summaryOrigin),
+    recoverability: buildRecoverabilitySignal(memory, summaryOrigin, sourceHealthStates),
     status:
       issues.length > 0
         ? ("warn" as const)
@@ -161,9 +269,12 @@ function scoreMemory(memory: ConversationItem, options: { keptArchiveCandidateId
 }
 
 export async function getMemoryQualityReport(dbPath: string, options: { limit?: number } = {}): Promise<MemoryQualityReport> {
-  const keptArchiveCandidateIds = await getKeptArchiveCandidateIds(dbPath);
-  const result = await searchMemories(dbPath, { limit: options.limit ?? 200 });
-  const items = result.items.map((memory) => scoreMemory(memory, { keptArchiveCandidateIds }));
+  const [keptArchiveCandidateIds, sourceHealthStates, result] = await Promise.all([
+    getKeptArchiveCandidateIds(dbPath),
+    getSourceHealthStates(dbPath),
+    searchMemories(dbPath, { limit: options.limit ?? 200 })
+  ]);
+  const items = result.items.map((memory) => scoreMemory(memory, { keptArchiveCandidateIds, sourceHealthStates }));
 
   return {
     items,
@@ -176,6 +287,10 @@ export async function getMemoryQualityReport(dbPath: string, options: { limit?: 
       threadBodySummaries: items.filter((item) => item.summaryOrigin === "thread-body").length,
       titleFallbackSummaries: items.filter((item) => item.summaryOrigin === "title-fallback").length,
       manualSummaries: items.filter((item) => item.summaryOrigin === "manual").length,
+      bodyBackedUpMemories: items.filter((item) => item.bodyBackup.status === "backed-up").length,
+      recoverableMemories: items.filter((item) => item.recoverability.status === "recoverable").length,
+      manualRepairMemories: items.filter((item) => item.recoverability.status === "manual-repaired").length,
+      sourceMissingMemories: items.filter((item) => item.recoverability.status === "source-missing").length,
       emptySummary: items.filter((item) => item.issues.some((issue) => issue.kind === "empty")).length,
       unstructuredSummary: items.filter((item) => item.issues.some((issue) => issue.kind === "unstructured")).length,
       noisySummary: items.filter((item) => item.issues.some((issue) => issue.kind === "noise")).length,

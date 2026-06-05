@@ -93,6 +93,18 @@ export default async function MemoryQualityPage() {
             <span>{report.summary.manualSummaries}</span>
             <p>人工摘要</p>
           </div>
+          <div>
+            <span>{report.summary.bodyBackedUpMemories}</span>
+            <p>正文备份</p>
+          </div>
+          <div>
+            <span>{report.summary.recoverableMemories}</span>
+            <p>可补救</p>
+          </div>
+          <div>
+            <span>{report.summary.sourceMissingMemories}</span>
+            <p>源缺失</p>
+          </div>
         </section>
 
         <section className="panel">
@@ -342,11 +354,14 @@ export default async function MemoryQualityPage() {
                   <div className="quality-row-head">
                     <div>
                       <span>{item.memory.source === "codex" ? "Codex" : "Claude"}</span>
+                      <span>{item.recoverability.label}</span>
                       <time>{new Date(item.memory.occurredAt).toLocaleString("zh-CN")}</time>
                     </div>
                     <strong>{item.memory.title}</strong>
                   </div>
+                  <p className="section-detail">{item.recoverability.detail}</p>
                   <p className="memory-summary">{item.memory.summary}</p>
+                  {item.recoverability.suggestion ? <p className="section-detail">{item.recoverability.suggestion}</p> : null}
                 </li>
               ))}
             </ol>

@@ -90,10 +90,23 @@ export type MemoryQualityIssue = {
   detail: string;
 };
 
+export type MemoryBodyBackupStatus = "backed-up" | "missing" | "manual-only";
+
+export type MemoryRecoverabilityStatus = "complete" | "recoverable" | "manual-repaired" | "source-missing" | "unknown-source";
+
+export type MemoryQualitySignal = {
+  status: MemoryBodyBackupStatus | MemoryRecoverabilityStatus;
+  label: string;
+  detail: string;
+  suggestion: string | null;
+};
+
 export type MemoryQualityItem = {
   memory: ConversationItem;
   status: "ok" | "needs-body" | "archive-candidate" | "warn";
   summaryOrigin: "thread-body" | "title-fallback" | "manual";
+  bodyBackup: MemoryQualitySignal;
+  recoverability: MemoryQualitySignal;
   issues: MemoryQualityIssue[];
 };
 
@@ -108,6 +121,10 @@ export type MemoryQualityReport = {
     threadBodySummaries: number;
     titleFallbackSummaries: number;
     manualSummaries: number;
+    bodyBackedUpMemories: number;
+    recoverableMemories: number;
+    manualRepairMemories: number;
+    sourceMissingMemories: number;
     emptySummary: number;
     unstructuredSummary: number;
     noisySummary: number;
@@ -227,7 +244,19 @@ export type ProjectDetail = {
   memories: ConversationItem[];
   relatedTags: string[];
   health: HealthCheckResult[];
+  memoryCoverage: ProjectMemoryCoverage;
   nextActions: string[];
+};
+
+export type ProjectMemoryCoverage = {
+  status: HealthStatus;
+  summary: string;
+  totalMemories: number;
+  threadBodyMemories: number;
+  titleFallbackMemories: number;
+  manualMemories: number;
+  sourceMissingMemories: number;
+  suggestions: string[];
 };
 
 export type ProjectKnowledgeSnapshot = {

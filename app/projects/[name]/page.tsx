@@ -160,6 +160,32 @@ export default async function ProjectDetailPage({ params }: { params: PageParams
 
             <section className="panel">
               <div className="section-heading">
+                <h2>记忆覆盖风险</h2>
+                <span className="muted-label">
+                  {detail.memoryCoverage.status === "ok" ? "稳定" : detail.memoryCoverage.status === "warn" ? "注意" : "高风险"}
+                </span>
+              </div>
+              <div className="manual-section-grid">
+                <div className={`manual-section ${detail.memoryCoverage.status === "ok" ? "" : "warn"}`}>
+                  <span className="muted-label">覆盖摘要</span>
+                  <p>{detail.memoryCoverage.summary}</p>
+                </div>
+                <SnapshotList
+                  title="覆盖指标"
+                  items={[
+                    `全部记忆：${detail.memoryCoverage.totalMemories}`,
+                    `正文摘要：${detail.memoryCoverage.threadBodyMemories}`,
+                    `标题兜底：${detail.memoryCoverage.titleFallbackMemories}`,
+                    `人工摘要：${detail.memoryCoverage.manualMemories}`,
+                    `源文件缺失：${detail.memoryCoverage.sourceMissingMemories}`
+                  ]}
+                />
+                <SnapshotList title="建议" items={detail.memoryCoverage.suggestions} />
+              </div>
+            </section>
+
+            <section className="panel">
+              <div className="section-heading">
                 <h2>下一步建议</h2>
                 <span className="muted-label">{detail.nextActions.length} 项</span>
               </div>

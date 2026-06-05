@@ -1,7 +1,8 @@
 import { ensureDatabase } from "./db.ts";
 import { projectNameFromHealthCheckId } from "./health.ts";
+import { getMemoryQualityReport } from "./memory-quality.ts";
 import { searchMemories } from "./search.ts";
-import type { HealthCheckResult, ProjectDetail, ProjectSnapshot } from "./types.ts";
+import type { ConversationItem, HealthCheckResult, MemoryQualityItem, ProjectDetail, ProjectMemoryCoverage, ProjectSnapshot } from "./types.ts";
 
 type ProjectRow = {
   path: string;
@@ -54,8 +55,12 @@ function buildNextActions(detail: {
   project: ProjectSnapshot;
   relatedTags: string[];
   health: HealthCheckResult[];
+  memoryCoverage: ProjectMemoryCoverage;
 }) {
   const actions: string[] = [];
+  if (detail.memoryCoverage.status !== "ok") {
+    actions.push(detail.memoryCoverage.suggestions[0] ?? "优先补齐这个项目的标题兜底记忆，降低上下文丢失风险。");
+  }
   if (detail.relatedTags.some((tag) => tag === "构建" || tag === "环境")) {
     actions.push("优先复查构建环境，把 JAVA_HOME、Gradle、依赖脚本这些阻塞项处理干净。");
   }
@@ -72,6 +77,48 @@ function buildNextActions(detail: {
     actions.push("补充这个项目的下一次目标，让记忆系统能持续追踪进展。");
   }
   return actions;
+}
+
+function buildProjectMemoryCoverage(memories: ConversationItem[], qualityById: Map<string, MemoryQualityItem>): ProjectMemoryCoverage {
+  const totalMemories = memories.length;
+  const qualityItems = memories.map((memory) => qualityById.get(memory.id)).filter((item): item is MemoryQualityItem => Boolean(item));
+  const threadBodyMemories = qualityItems.filter((item) => item.summaryOrigin === "thread-body").length;
+  const titleFallbackMemories = qualityItems.filter((item) => item.summaryOrigin === "title-fallback").length;
+  const manualMemories = qualityItems.filter((item) => item.summaryOrigin === "manual").length;
+  const sourceMissingMemories = qualityItems.filter((item) => item.recoverability.status === "source-missing").length;
+  const suggestions: string[] = [];
+
+  if (sourceMissingMemories > 0) {
+    suggestions.push(`优先补摘要：${sourceMissingMemories} 条记忆的源索引缺失，自动恢复风险最高。`);
+  }
+  if (titleFallbackMemories > 0) {
+    suggestions.push(`补摘要：${titleFallbackMemories} 条标题兜底记忆还没有正文摘要。`);
+  }
+  if (totalMemories === 0) {
+    suggestions.push("重新采集或确认项目路径关联，让这个项目至少有一条可追溯记忆。");
+  }
+  if (suggestions.length === 0) {
+    suggestions.push("当前项目记忆覆盖稳定，后续保持阶段快照和复盘同步。");
+  }
+
+  const status = sourceMissingMemories > 0 || totalMemories === 0 ? ("fail" as const) : titleFallbackMemories > 0 ? ("warn" as const) : ("ok" as const);
+  const summary =
+    totalMemories === 0
+      ? "这个项目还没有关联记忆。"
+      : status === "ok"
+        ? `当前 ${totalMemories} 条关联记忆都有正文摘要或人工摘要。`
+        : `当前 ${totalMemories} 条关联记忆中，${titleFallbackMemories} 条标题兜底，${sourceMissingMemories} 条源索引缺失。`;
+
+  return {
+    status,
+    summary,
+    totalMemories,
+    threadBodyMemories,
+    titleFallbackMemories,
+    manualMemories,
+    sourceMissingMemories,
+    suggestions
+  };
 }
 
 export async function getProjectDetail(dbPath: string, projectName: string): Promise<ProjectDetail | null> {
@@ -95,6 +142,9 @@ export async function getProjectDetail(dbPath: string, projectName: string): Pro
     const relatedTags = Array.from(new Set(fallbackMemoryResult.items.flatMap((item) => item.tags))).sort((a, b) =>
       a.localeCompare(b, "zh-CN")
     );
+    const qualityReport = await getMemoryQualityReport(dbPath, { limit: Number.MAX_SAFE_INTEGER });
+    const qualityById = new Map(qualityReport.items.map((item) => [item.memory.id, item]));
+    const memoryCoverage = buildProjectMemoryCoverage(fallbackMemoryResult.items, qualityById);
     const healthRows = db
       .prepare(
         `SELECT id, label, status, detail, suggestion
@@ -110,13 +160,14 @@ export async function getProjectDetail(dbPath: string, projectName: string): Pro
       return relatedTags.some((tag) => check.label.toLocaleLowerCase("zh-CN").includes(tag.toLocaleLowerCase("zh-CN")));
     });
 
-    const nextActions = buildNextActions({ project, relatedTags, health });
+    const nextActions = buildNextActions({ project, relatedTags, health, memoryCoverage });
 
     return {
       project,
       memories: fallbackMemoryResult.items,
       relatedTags,
       health,
+      memoryCoverage,
       nextActions
     };
   } finally {

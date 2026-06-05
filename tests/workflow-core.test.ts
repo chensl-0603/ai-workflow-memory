@@ -429,6 +429,40 @@ test("scores memory summary quality and reports anomalies", async () => {
   }
 });
 
+test("reports memory body backup and recoverability states", async () => {
+  const fixture = await makeFixtureDir();
+  try {
+    await ingestAllSources(fixture);
+    const db = await ensureDatabase(fixture.dbPath);
+    db.prepare(
+      `UPDATE source_health_checks
+       SET file_exists = 0,
+           item_count = 0,
+           detail = 'Codex session_index.jsonl 不存在。'
+       WHERE source = 'codex'`
+    ).run();
+    db.close();
+
+    const report = await getMemoryQualityReport(fixture.dbPath, { limit: 20 });
+    const byId = new Map(report.items.map((item) => [item.memory.id, item]));
+
+    assert.equal(report.summary.bodyBackedUpMemories, 2);
+    assert.equal(report.summary.recoverableMemories, 1);
+    assert.equal(report.summary.sourceMissingMemories, 1);
+    assert.equal(byId.get("codex:codex-1")?.bodyBackup.status, "backed-up");
+    assert.equal(byId.get("codex:codex-1")?.recoverability.status, "complete");
+    assert.equal(byId.get("codex:codex-2")?.bodyBackup.status, "missing");
+    assert.equal(byId.get("codex:codex-2")?.recoverability.status, "source-missing");
+    assert.match(byId.get("codex:codex-2")?.recoverability.suggestion ?? "", /补摘要|源文件/);
+    assert.equal(
+      report.items.find((item) => item.memory.title === "阅读 FIX-PLAN.md 修复页面布局")?.recoverability.status,
+      "recoverable"
+    );
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("keeps manually corrected memory summaries across later ingest runs", async () => {
   const fixture = await makeFixtureDir();
   try {
@@ -1214,7 +1248,17 @@ test("builds project detail with linked memories, tags, health, and next actions
     assert.ok(detail?.health.some((check) => check.id === "tool:FarmGame:maven"));
     assert.equal(detail?.health.some((check) => check.id.startsWith("env:hotspot-hub")), false);
     assert.equal(detail?.health.some((check) => check.id.startsWith("tool:hotspot-hub:")), false);
+    assert.equal(detail?.memoryCoverage.status, "ok");
+    assert.equal(detail?.memoryCoverage.threadBodyMemories, 1);
+    assert.equal(detail?.memoryCoverage.titleFallbackMemories, 0);
     assert.ok(detail?.nextActions.some((action) => action.includes("构建环境")));
+
+    const hotspot = await getProjectDetail(fixture.dbPath, "hotspot-hub");
+    assert.equal(hotspot?.memoryCoverage.status, "warn");
+    assert.equal(hotspot?.memoryCoverage.threadBodyMemories, 1);
+    assert.equal(hotspot?.memoryCoverage.titleFallbackMemories, 1);
+    assert.match(hotspot?.memoryCoverage.summary ?? "", /1 条标题兜底/);
+    assert.ok(hotspot?.nextActions.some((action) => action.includes("补摘要")));
 
     const missing = await getProjectDetail(fixture.dbPath, "missing-project");
     assert.equal(missing, null);
@@ -1369,6 +1413,9 @@ test("exports project archive while preserving manual Obsidian notes", async () 
     assert.match(markdown, /Maven, Java/);
     assert.match(markdown, /JAVA_HOME is not set，检查 Gradle 构建环境/);
     assert.match(markdown, /构建环境/);
+    assert.match(markdown, /## 记忆覆盖风险/);
+    assert.match(markdown, /正文摘要：1/);
+    assert.match(markdown, /标题兜底：0/);
     assert.match(markdown, /## 阶段快照/);
     assert.match(markdown, /恢复构建环境可见性/);
     assert.match(markdown, /当前架构/);
@@ -2005,6 +2052,9 @@ test("exports memory quality audit while preserving manual Obsidian notes", asyn
     assert.match(markdown, /# 记忆质量审计/);
     assert.match(markdown, /2026-05-30/);
     assert.match(markdown, /## 摘要质量/);
+    assert.match(markdown, /## 可恢复性/);
+    assert.match(markdown, /正文已备份/);
+    assert.match(markdown, /可补救/);
     assert.match(markdown, /## 归档候选/);
     assert.match(markdown, /## 已保留候选/);
     assert.match(markdown, /保留快捷命令/);

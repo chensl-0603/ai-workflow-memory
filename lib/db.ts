@@ -105,6 +105,17 @@ export async function ensureDatabase(dbPath: string) {
       checked_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS health_check_history (
+      id TEXT PRIMARY KEY,
+      check_id TEXT NOT NULL,
+      label TEXT NOT NULL,
+      status TEXT NOT NULL,
+      detail TEXT NOT NULL,
+      suggestion TEXT,
+      project_name TEXT,
+      checked_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS source_health_checks (
       source TEXT PRIMARY KEY,
       path TEXT NOT NULL,

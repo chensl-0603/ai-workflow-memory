@@ -1,5 +1,6 @@
 import { ensureDatabase } from "./db.ts";
 import { projectNameFromHealthCheckId } from "./health.ts";
+import { getHealthTrendReport } from "./health-trends.ts";
 import { getMemoryQualityReport } from "./memory-quality.ts";
 import { searchMemories } from "./search.ts";
 import type { ConversationItem, HealthCheckResult, MemoryQualityItem, ProjectDetail, ProjectMemoryCoverage, ProjectSnapshot } from "./types.ts";
@@ -160,6 +161,7 @@ export async function getProjectDetail(dbPath: string, projectName: string): Pro
       return relatedTags.some((tag) => check.label.toLocaleLowerCase("zh-CN").includes(tag.toLocaleLowerCase("zh-CN")));
     });
 
+    const healthTrend = await getHealthTrendReport(dbPath, { projectName: project.name, limit: 5 });
     const nextActions = buildNextActions({ project, relatedTags, health, memoryCoverage });
 
     return {
@@ -167,6 +169,7 @@ export async function getProjectDetail(dbPath: string, projectName: string): Pro
       memories: fallbackMemoryResult.items,
       relatedTags,
       health,
+      healthTrend,
       memoryCoverage,
       nextActions
     };

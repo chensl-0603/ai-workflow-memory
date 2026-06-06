@@ -9,7 +9,7 @@ import { defaultConfig } from "../../../lib/paths.ts";
 import { getProjectArchiveIndex } from "../../../lib/project-archives.ts";
 import { getProjectDetail } from "../../../lib/project-detail.ts";
 import { getLatestProjectPhaseReview } from "../../../lib/phase-reviews.ts";
-import type { ProjectKnowledgeSnapshot, ProjectPhaseReview } from "../../../lib/types.ts";
+import type { HealthTrendItem, ProjectKnowledgeSnapshot, ProjectPhaseReview } from "../../../lib/types.ts";
 
 type PageParams = Promise<{
   name: string;
@@ -215,6 +215,15 @@ export default async function ProjectDetailPage({ params }: { params: PageParams
                 <h2>环境提醒</h2>
                 <Link href="/health">{warningHealth.length > 0 ? `${warningHealth.length} 个提醒` : "查看体检"}</Link>
               </div>
+              {detail.healthTrend.items.length > 0 ? (
+                <HealthTrendView items={detail.healthTrend.items} />
+              ) : (
+                <EmptyState title="暂无趋势记录" detail="运行多次采集后，这里会显示该项目最近环境状态变化。" />
+              )}
+              <div className="section-heading">
+                <h2>当前状态</h2>
+                <span className="muted-label">{detail.healthTrend.summary.repeatedAnomalies} 个反复异常</span>
+              </div>
               {detail.health.length === 0 ? (
                 <EmptyState title="暂无关联提醒" detail="环境检查结果正常，或暂时没有和该项目标签相关的体检项。" />
               ) : (
@@ -236,6 +245,26 @@ export default async function ProjectDetailPage({ params }: { params: PageParams
         </div>
       </main>
     </>
+  );
+}
+
+function HealthTrendView({ items }: { items: HealthTrendItem[] }) {
+  return (
+    <div className="manual-section-grid">
+      {items.slice(0, 4).map((item) => (
+        <div key={item.checkId} className={`manual-section ${item.repeated ? "warn" : ""}`}>
+          <span className="muted-label">{item.repeated ? "反复异常" : labelByStatus[item.latestStatus]}</span>
+          <p>{item.summary}</p>
+          <ul>
+            {item.recent.slice(0, 3).map((point) => (
+              <li key={`${item.checkId}-${point.checkedAt}`}>
+                {point.checkedAt.slice(0, 10)}：{labelByStatus[point.status]}，{point.detail}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
   );
 }
 

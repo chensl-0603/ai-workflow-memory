@@ -31,6 +31,37 @@ export type HealthCheckResult = {
   suggestion: string | null;
 };
 
+export type HealthTrendKind = "ok" | "new" | "persistent" | "recovered";
+
+export type HealthTrendPoint = HealthCheckResult & {
+  checkedAt: string;
+};
+
+export type HealthTrendItem = {
+  checkId: string;
+  label: string;
+  projectName: string | null;
+  latestStatus: HealthStatus;
+  latestDetail: string;
+  latestSuggestion: string | null;
+  latestCheckedAt: string;
+  recent: HealthTrendPoint[];
+  nonOkCount: number;
+  trend: HealthTrendKind;
+  repeated: boolean;
+  summary: string;
+};
+
+export type HealthTrendReport = {
+  items: HealthTrendItem[];
+  summary: {
+    totalChecks: number;
+    repeatedAnomalies: number;
+    projectsWithRepeatedAnomalies: number;
+    limit: number;
+  };
+};
+
 export type SourceHealthItem = {
   source: SourceKind;
   path: string;
@@ -244,6 +275,7 @@ export type ProjectDetail = {
   memories: ConversationItem[];
   relatedTags: string[];
   health: HealthCheckResult[];
+  healthTrend: HealthTrendReport;
   memoryCoverage: ProjectMemoryCoverage;
   nextActions: string[];
 };
@@ -358,9 +390,12 @@ export type BlockerBoardItem = {
   projectPath: string;
   archivePath: string;
   source: "manual" | "health";
+  checkId?: string;
   text: string;
   status: HealthStatus | "manual";
   suggestion: string | null;
+  repeatCount?: number;
+  trend?: HealthTrendKind;
 };
 
 export type BlockerBoard = {

@@ -5,7 +5,7 @@ import { cleanupDeletedProjectMemories } from "./cleanup.ts";
 import { ensureDatabase } from "./db.ts";
 import { readClaudeConversations, readCodexConversations } from "./conversations.ts";
 import { scanProjects } from "./projects.ts";
-import { buildProjectHealthOptions, runHealthChecks } from "./health.ts";
+import { buildProjectHealthOptions, projectNameFromHealthCheckId, runHealthChecks } from "./health.ts";
 import { collectSourceHealth } from "./source-health.ts";
 
 async function projectPathExists(projectPath: string | null) {
@@ -70,7 +70,7 @@ function upsertProject(db: Awaited<ReturnType<typeof ensureDatabase>>, project: 
   );
 }
 
-function upsertHealth(db: Awaited<ReturnType<typeof ensureDatabase>>, check: HealthCheckResult) {
+function upsertHealth(db: Awaited<ReturnType<typeof ensureDatabase>>, check: HealthCheckResult, checkedAt: string) {
   db.prepare(
     `INSERT INTO health_checks
      (id, label, status, detail, suggestion, checked_at)
@@ -81,7 +81,24 @@ function upsertHealth(db: Awaited<ReturnType<typeof ensureDatabase>>, check: Hea
        detail = excluded.detail,
        suggestion = excluded.suggestion,
        checked_at = excluded.checked_at`
-  ).run(check.id, check.label, check.status, check.detail, check.suggestion, new Date().toISOString());
+  ).run(check.id, check.label, check.status, check.detail, check.suggestion, checkedAt);
+}
+
+function insertHealthHistory(db: Awaited<ReturnType<typeof ensureDatabase>>, check: HealthCheckResult, checkedAt: string) {
+  db.prepare(
+    `INSERT INTO health_check_history
+     (id, check_id, label, status, detail, suggestion, project_name, checked_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    `health:${checkedAt}:${check.id}`,
+    check.id,
+    check.label,
+    check.status,
+    check.detail,
+    check.suggestion,
+    projectNameFromHealthCheckId(check.id),
+    checkedAt
+  );
 }
 
 function upsertSourceHealth(db: Awaited<ReturnType<typeof ensureDatabase>>, source: SourceHealthItem) {
@@ -143,8 +160,10 @@ export async function ingestAllSources(config: AppConfig) {
       for (const project of projects) {
         upsertProject(db, project);
       }
+      const checkedAt = new Date().toISOString();
       for (const check of health) {
-        upsertHealth(db, check);
+        upsertHealth(db, check, checkedAt);
+        insertHealthHistory(db, check, checkedAt);
       }
       for (const source of sources) {
         upsertSourceHealth(db, source);

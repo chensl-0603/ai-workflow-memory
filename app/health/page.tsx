@@ -2,6 +2,7 @@ import { EmptyState } from "../empty-state";
 import { AppNav } from "../nav";
 import { defaultConfig, toDateKey } from "../../lib/paths.ts";
 import { getDailyReview } from "../../lib/review.ts";
+import { getHealthTrendReport } from "../../lib/health-trends.ts";
 import { getSourceHealthReport, sourceHealthToCheck } from "../../lib/source-health.ts";
 
 export const dynamic = "force-dynamic";
@@ -13,11 +14,13 @@ const labelByStatus = {
 };
 
 export default async function HealthPage() {
-  const [review, sourceHealth] = await Promise.all([
+  const [review, sourceHealth, trend] = await Promise.all([
     getDailyReview(defaultConfig.dbPath, toDateKey(new Date())),
-    getSourceHealthReport(defaultConfig.dbPath)
+    getSourceHealthReport(defaultConfig.dbPath),
+    getHealthTrendReport(defaultConfig.dbPath, { limit: 5 })
   ]);
   const sourceChecks = sourceHealth.items.map(sourceHealthToCheck);
+  const repeated = trend.items.filter((item) => item.repeated);
 
   return (
     <>
@@ -30,6 +33,33 @@ export default async function HealthPage() {
           </div>
           <p>检查本地运行时和配置文件存在性，不展示任何密钥值。</p>
         </header>
+
+        <section className="panel">
+          <div className="section-heading">
+            <div>
+              <h2>健康趋势</h2>
+              <p className="section-detail">
+                已记录 {trend.summary.totalChecks} 个检查项，{trend.summary.repeatedAnomalies} 个反复异常，覆盖最近 {trend.summary.limit} 次采集。
+              </p>
+            </div>
+          </div>
+          {trend.items.length === 0 ? (
+            <EmptyState title="还没有趋势记录" detail="运行两次以上采集后，这里会显示工具、env 和 wrapper 的最近状态变化。" />
+          ) : (
+            <div className="health-list">
+              {(repeated.length > 0 ? repeated : trend.items.slice(0, 8)).map((item) => (
+                <article key={item.checkId} className={`health-row ${item.latestStatus}`}>
+                  <div>
+                    <strong>{item.projectName ? `${item.projectName} ${item.label}` : item.label}</strong>
+                    <span>{item.repeated ? "反复异常" : labelByStatus[item.latestStatus]}</span>
+                  </div>
+                  <p>{item.summary}</p>
+                  <small>{item.recent.map((point) => `${point.checkedAt.slice(0, 10)} ${labelByStatus[point.status]}`).join(" / ")}</small>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
 
         <section className="panel">
           {review.health.length === 0 ? (

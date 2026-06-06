@@ -54,6 +54,7 @@ import { diagnoseSyncFailure, getRecentSyncRuns, getSyncAudit, getSyncSnapshots,
 import { getInitialSyncControlState, getRetryableSyncRunId } from "../lib/sync-console-state.ts";
 import { ensureDatabase } from "../lib/db.ts";
 import { getSourceHealthReport } from "../lib/source-health.ts";
+import { getHealthTrendReport } from "../lib/health-trends.ts";
 import { generateProjectKnowledgeSnapshot, getLatestProjectKnowledgeSnapshot } from "../lib/project-knowledge.ts";
 import { generateProjectPhaseReview, getLatestProjectPhaseReview } from "../lib/phase-reviews.ts";
 
@@ -1263,6 +1264,43 @@ test("builds project detail with linked memories, tags, health, and next actions
 
     const missing = await getProjectDetail(fixture.dbPath, "missing-project");
     assert.equal(missing, null);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("records health check history and promotes repeated environment anomalies", async () => {
+  const fixture = await makeFixtureDir();
+  try {
+    await ingestAllSources(fixture);
+    await ingestAllSources(fixture);
+    await exportAllProjectArchives({
+      dbPath: fixture.dbPath,
+      obsidianVault: fixture.obsidianVault
+    });
+
+    const trend = await getHealthTrendReport(fixture.dbPath, { limit: 5 });
+    const farmWrapper = trend.items.find((item) => item.checkId === "file:FarmGame:maven-wrapper");
+    const detail = await getProjectDetail(fixture.dbPath, "FarmGame");
+    const board = await getBlockerBoard({
+      dbPath: fixture.dbPath,
+      obsidianVault: fixture.obsidianVault
+    });
+    const repeatedBlocker = board.items.find((item) => item.projectName === "FarmGame" && item.checkId === "file:FarmGame:maven-wrapper");
+
+    assert.ok(farmWrapper);
+    assert.equal(farmWrapper?.projectName, "FarmGame");
+    assert.equal(farmWrapper?.recent.length, 2);
+    assert.equal(farmWrapper?.nonOkCount, 2);
+    assert.equal(farmWrapper?.trend, "persistent");
+    assert.match(farmWrapper?.summary ?? "", /连续 2 次/);
+    assert.equal(trend.summary.repeatedAnomalies > 0, true);
+    assert.ok(detail?.healthTrend.items.some((item) => item.checkId === "file:FarmGame:maven-wrapper" && item.trend === "persistent"));
+    assert.equal((detail?.healthTrend.summary.repeatedAnomalies ?? 0) >= 1, true);
+    assert.equal(repeatedBlocker?.repeatCount, 2);
+    assert.equal(repeatedBlocker?.trend, "persistent");
+    assert.match(repeatedBlocker?.text ?? "", /持续异常/);
+    assert.match(repeatedBlocker?.suggestion ?? "", /连续 2 次/);
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }
